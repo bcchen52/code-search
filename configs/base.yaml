@@ -1,0 +1,54 @@
+# The current best pipeline configuration.
+#
+# Experiments in configs/exp/ extend this file with one change each. A change
+# whose paired 95% interval on the dev split excludes zero is merged here, with
+# the run ids in the commit message, so the history of this file records every
+# accepted change. configs/design.yaml is the full design, for comparison.
+# See docs/decisions/D39-config-base-and-design.md.
+
+index:
+  chunker: fixed                 # fixed | ast
+  min_tokens: 40
+  target_tokens: 400
+  max_tokens: 800                # keep below the embedder's input limit
+  split_overlap_lines: 5         # overlap between the parts of an oversized function
+  fallback_window_lines: 40      # fixed windows; also used when a file fails to parse
+  fallback_overlap_lines: 10
+  skeleton_chunks: false         # add class skeleton chunks beside method chunks
+  enrich_header: false           # prefix embed_text with path, symbol, and imports
+  stores: [vectors]              # any of: vectors, lexical, symbols
+  embedder: nomic-embed-text     # a key of cqa.embed.MODELS
+  dims: 768                      # up to the model's native size; smaller truncates
+  store: flat                    # flat | hnswlib | cpp; not part of the index identity
+
+retrieve:
+  lists: [dense]                 # any of: dense, bm25, symbol; each needs its store
+  dense_k: 50
+  bm25_k: 50
+  bm25_weights: [4.0, 2.0, 1.0]  # symbol, path, and body columns
+  symbol_refs_k: 20
+  fusion: {method: rrf, k: 60, weights: {dense: 1, bm25: 1, symbol: 1}}
+  candidates: 40                 # fused candidates passed to the reranker
+
+rerank:
+  model: none                    # none | cross-encoder | llm
+  model_id: null
+  keep: 8
+  gate_tau: null                 # confidence-gate threshold; null disables the gate
+
+context:
+  budget_tokens: 12000
+  order: rank                    # rank | by_file_best_first | ends
+
+generate:
+  model: "<generator model id>"
+  temperature: 0
+  max_tokens: 1200
+  prompt_version: minimal-v0     # a template in cqa/generate/prompts/
+
+agent:
+  model: "<agent model id>"
+  max_tool_calls: 15
+  max_input_tokens: 150000
+  max_tool_output_tokens: 4000
+  wall_clock_s: 90

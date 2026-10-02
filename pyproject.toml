@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cqa"
+version = "0.1.0.dev0"
+description = "Question answering over a codebase, with line-level citations and an evaluation harness"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "numpy>=1.26",
+  "pydantic>=2.6",
+  "pyyaml>=6",
+  "tiktoken>=0.7",
+  "tree-sitter>=0.25",
+  "tree-sitter-python>=0.23",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+llm = ["anthropic>=0.40"]
+local = ["sentence-transformers>=3", "einops>=0.7"]
+voyage = ["voyageai>=0.3"]
+hnsw = ["hnswlib>=0.8"]
+serve = ["fastapi>=0.110", "uvicorn>=0.29"]
+dev = ["mypy>=1.10", "pytest>=8", "ruff>=0.6", "types-PyYAML>=6"]
+
+[project.scripts]
+cqa = "cqa.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["cqa*"]
+
+[tool.setuptools.package-data]
+cqa = ["py.typed", "*.sql", "queries/**/*.scm", "generate/prompts/*.txt", "eval/prompts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cqa"]
+known-local-folder = ["helpers"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["cqa"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["tree_sitter_python", "hnswlib", "sentence_transformers", "voyageai", "anthropic", "fastapi", "uvicorn"]
+ignore_missing_imports = true

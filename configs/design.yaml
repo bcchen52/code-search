@@ -1,0 +1,51 @@
+# The full designed configuration, standalone.
+#
+# Evaluate it beside the current best at any time:
+#   cqa eval run --config configs/design.yaml --hypothesis "..."
+
+index:
+  chunker: ast
+  min_tokens: 40
+  target_tokens: 400
+  max_tokens: 800
+  split_overlap_lines: 5
+  fallback_window_lines: 40
+  fallback_overlap_lines: 10
+  skeleton_chunks: true
+  enrich_header: true
+  stores: [vectors, lexical, symbols]
+  embedder: qwen3-embedding-0.6b
+  dims: 1024
+  store: flat
+
+retrieve:
+  lists: [dense, bm25, symbol]
+  dense_k: 50
+  bm25_k: 50
+  bm25_weights: [4.0, 2.0, 1.0]
+  symbol_refs_k: 20
+  fusion: {method: rrf, k: 60, weights: {dense: 1, bm25: 1, symbol: 1}}
+  candidates: 40
+
+rerank:
+  model: cross-encoder
+  model_id: "<reranker model id>"
+  keep: 8
+  gate_tau: null
+
+context:
+  budget_tokens: 12000
+  order: by_file_best_first
+
+generate:
+  model: "<generator model id>"
+  temperature: 0
+  max_tokens: 1200
+  prompt_version: grounded-v1
+
+agent:
+  model: "<agent model id>"
+  max_tool_calls: 15
+  max_input_tokens: 150000
+  max_tool_output_tokens: 4000
+  wall_clock_s: 90

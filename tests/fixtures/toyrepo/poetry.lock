@@ -1,0 +1,4 @@
+# This file is a fixture: the walker must skip it as a lockfile.
+[[package]]
+name = "pyjwt"
+version = "2.9.0"

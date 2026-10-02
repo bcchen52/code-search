@@ -1,0 +1,9 @@
+Answer the question about the repository {repo} at commit {sha} using the code excerpts below.
+Cite the excerpts you use by label, like [C2].
+{low_confidence_notice}
+
+<excerpts>
+{excerpts}
+</excerpts>
+
+Question: {question}

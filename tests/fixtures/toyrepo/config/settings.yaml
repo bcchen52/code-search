@@ -1,0 +1,6 @@
+session:
+  ttl_hours: 12
+  refresh_window_minutes: 30
+  max_per_user: 5
+jwt:
+  algorithm: HS256
