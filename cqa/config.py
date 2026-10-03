@@ -11,10 +11,16 @@ configured values, whatever defaults a constructor has for direct use.
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+import yaml
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+
+from cqa.errors import ConfigError
 
 
 class StrictModel(BaseModel):
@@ -78,10 +84,17 @@ class ContextConfig(StrictModel):
 
 
 class GenerateConfig(StrictModel):
-    """The answering model and prompt."""
+    """The answering model, how much it reasons, and the prompt.
+
+    ``thinking`` is ``off`` (answer directly) or ``adaptive`` (the model decides
+    how much to reason before answering); ``effort`` sets how much it spends.
+    Sampling parameters such as temperature are not configurable: current
+    models reject non-default values. See docs/decisions/D48-generation-knobs.md.
+    """
 
     model: str
-    temperature: float
+    thinking: Literal["off", "adaptive"]
+    effort: Literal["low", "medium", "high", "xhigh", "max"]
     max_tokens: int
     prompt_version: str
 
@@ -132,7 +145,34 @@ def load_config(path: str | Path) -> Config:
         ConfigError: If a file in the chain is missing, the chain has a cycle,
             or the merged configuration fails validation.
     """
-    raise NotImplementedError
+    merged = _load_raw(Path(path), seen=set())
+    try:
+        return Config.model_validate(merged)
+    except ValidationError as e:
+        raise ConfigError(f"invalid configuration {path}:\n{e}") from e
+
+
+def _load_raw(path: Path, seen: set[Path]) -> dict[str, Any]:
+    """Read one file and merge it over its ``extends`` parent, unvalidated."""
+    resolved = path.resolve()
+    if resolved in seen:
+        raise ConfigError(f"extends cycle: {path} is reached twice")
+    seen.add(resolved)
+    try:
+        data = yaml.safe_load(resolved.read_text())
+    except FileNotFoundError as e:
+        raise ConfigError(f"configuration file not found: {path}") from e
+    except yaml.YAMLError as e:
+        raise ConfigError(f"invalid YAML in {path}: {e}") from e
+    data = {} if data is None else data
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: the top level must be a mapping")
+    parent = data.pop("extends", None)
+    if parent is None:
+        return data
+    if not isinstance(parent, str):
+        raise ConfigError(f"{path}: extends must be a relative path")
+    return deep_merge(_load_raw(resolved.parent / parent, seen), data)
 
 
 def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -145,15 +185,22 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
         ``deep_merge({"a": {"x": 1, "y": 2}, "l": [1, 2]}, {"a": {"y": 3}, "l": [9]})``
         returns ``{"a": {"x": 1, "y": 3}, "l": [9]}``.
     """
-    raise NotImplementedError
+    out = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = deep_merge(out[key], value)
+        else:
+            out[key] = copy.deepcopy(value)
+    return out
 
 
 def canonical_json(obj: Any) -> str:
     """Serialize to JSON with sorted keys and no insignificant whitespace.
 
     Equal values always produce the same string, whatever their key order.
+    NaN and infinities are rejected, since they have no stable JSON form.
     """
-    raise NotImplementedError
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
 def config_hash(cfg: Config) -> str:
@@ -162,4 +209,4 @@ def config_hash(cfg: Config) -> str:
     The hash identifies a configuration on every index, query, and evaluation
     run. It changes with any value and never with key order or YAML layout.
     """
-    raise NotImplementedError
+    return hashlib.sha256(canonical_json(cfg.model_dump(mode="json")).encode()).hexdigest()
