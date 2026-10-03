@@ -3,7 +3,9 @@
 import pytest
 import yaml
 from pydantic import ValidationError
+from typer.testing import CliRunner
 
+from cqa.cli import app
 from cqa.config import Config, canonical_json, config_hash, deep_merge, load_config
 from cqa.errors import ConfigError
 
@@ -104,3 +106,16 @@ def test_hash_changes_with_any_value():
     changed = Config.model_validate(deep_merge(base.model_dump(), {"context": {"budget_tokens": 8000}}))
     assert len(config_hash(base)) == 64
     assert config_hash(base) != config_hash(changed)
+
+
+def test_cli_prints_the_merged_config_and_its_hash():
+    result = CliRunner().invoke(app, ["config", str(CONFIGS / "base.yaml")])
+    assert result.exit_code == 0
+    assert yaml.safe_load(result.stdout)["index"]["chunker"] == "fixed"
+    assert result.stdout.strip().endswith(config_hash(load_config(CONFIGS / "base.yaml")))
+
+
+def test_cli_reports_a_bad_config_without_a_traceback(tmp_path):
+    result = CliRunner().invoke(app, ["config", str(tmp_path / "missing.yaml")])
+    assert result.exit_code == 1
+    assert "not found" in result.stderr
