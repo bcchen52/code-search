@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
+
+from cqa.config import config_hash, load_config
+from cqa.errors import CqaError
 
 app = typer.Typer(
     help="Question answering over a codebase, with line-level citations.",
@@ -51,4 +55,10 @@ def show_config(
     path: Annotated[Path, typer.Argument(help="Configuration file to resolve.")],
 ) -> None:
     """Print the fully merged configuration and its hash."""
-    raise NotImplementedError
+    try:
+        cfg = load_config(path)
+    except CqaError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+    typer.echo(yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False), nl=False)
+    typer.echo(f"# config_hash: {config_hash(cfg)}")
