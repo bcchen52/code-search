@@ -38,8 +38,9 @@ context:
   order: by_file_best_first
 
 generate:
-  model: "<generator model id>"
-  temperature: 0
+  model: claude-sonnet-5-5
+  thinking: adaptive
+  effort: medium
   max_tokens: 1200
   prompt_version: grounded-v1
 

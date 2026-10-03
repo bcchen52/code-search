@@ -41,8 +41,9 @@ context:
   order: rank                    # rank | by_file_best_first | ends
 
 generate:
-  model: "<generator model id>"
-  temperature: 0
+  model: claude-sonnet-5-5
+  thinking: "off"                # off | adaptive; reasoning runs before the first token
+  effort: medium                 # low | medium | high | xhigh | max
   max_tokens: 1200
   prompt_version: minimal-v0     # a template in cqa/generate/prompts/
 
