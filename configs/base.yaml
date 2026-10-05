@@ -17,7 +17,7 @@ index:
   skeleton_chunks: false         # add class skeleton chunks beside method chunks
   enrich_header: false           # prefix embed_text with path, symbol, and imports
   stores: [vectors]              # any of: vectors, lexical, symbols
-  embedder: nomic-embed-text     # a key of cqa.embed.MODELS
+  embedder: modernbert-embed-base  # a key of cqa.embed.MODELS
   dims: 768                      # up to the model's native size; smaller truncates
   store: flat                    # flat | hnswlib | cpp; not part of the index identity
 
