@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from cqa.config import IndexConfig
+from cqa.embed.cache import CachedEmbedder
+from cqa.embed.local import LocalEmbedder
+from cqa.errors import ConfigError
 from cqa.types import Embedder
 
 
@@ -21,6 +24,9 @@ class ModelSpec:
         query_prefix: Text prepended to queries.
         document_prefix: Text prepended to documents.
         trust_remote_code: Whether the model's own loading code must run.
+        revision: The model repository commit to load; required for local
+            models, so the weights and any code they bring never change under
+            an existing cache. See docs/decisions/D50-embedder-pins.md.
     """
 
     backend: Literal["local", "voyage"]
@@ -29,16 +35,17 @@ class ModelSpec:
     query_prefix: str = ""
     document_prefix: str = ""
     trust_remote_code: bool = False
+    revision: str | None = None
 
 
 MODELS: dict[str, ModelSpec] = {
-    "nomic-embed-text": ModelSpec(
+    "modernbert-embed-base": ModelSpec(
         "local",
-        "nomic-ai/nomic-embed-text-v1.5",
+        "nomic-ai/modernbert-embed-base",
         768,
         query_prefix="search_query: ",
         document_prefix="search_document: ",
-        trust_remote_code=True,
+        revision="d556a88e332558790b210f7bdbe87da2fa94a8d8",
     ),
     "qwen3-embedding-0.6b": ModelSpec(
         "local",
@@ -47,6 +54,7 @@ MODELS: dict[str, ModelSpec] = {
         query_prefix=(
             "Instruct: Given a question about a code repository, retrieve the code that answers it\nQuery:"
         ),
+        revision="97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3",
     ),
     "voyage-4": ModelSpec("voyage", "voyage-4", 1024),
 }
@@ -61,6 +69,25 @@ def make_embedder(cfg: IndexConfig, cache: sqlite3.Connection | None) -> Embedde
     vectors (Matryoshka truncation).
 
     Raises:
-        ConfigError: If the embedder is unknown or ``cfg.dims`` exceeds its native size.
+        ConfigError: If the embedder is unknown, ``cfg.dims`` is not between 1
+            and its native size, or its backend is not available yet (only
+            ``local`` is, for now).
     """
-    raise NotImplementedError
+    spec = MODELS.get(cfg.embedder)
+    if spec is None:
+        names = ", ".join(sorted(MODELS))
+        raise ConfigError(f"index.embedder: unknown {cfg.embedder!r}; choose one of {names}")
+    if not 0 < cfg.dims <= spec.dims:
+        raise ConfigError(f"index.dims: {cfg.embedder} supports 1 to {spec.dims} dimensions, got {cfg.dims}")
+    if spec.backend != "local":
+        raise ConfigError(f"index.embedder: the {spec.backend!r} backend is not available yet")
+    inner = LocalEmbedder(
+        cfg.embedder,
+        spec.provider_id,
+        cfg.dims,
+        query_prefix=spec.query_prefix,
+        document_prefix=spec.document_prefix,
+        trust_remote_code=spec.trust_remote_code,
+        revision=spec.revision,
+    )
+    return CachedEmbedder(inner, cache) if cache is not None else inner
