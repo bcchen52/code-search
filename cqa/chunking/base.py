@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
-from cqa.types import Chunk, SourceFile
+from cqa.tokens import count_tokens
+from cqa.types import UNASSIGNED, Chunk, SourceFile
 
 
 def split_lines(text: str) -> list[str]:
     """Split text into lines without newlines; line ``i`` is ``result[i - 1]``.
 
-    A trailing newline does not produce an empty final line.
+    A trailing newline does not produce an empty final line. Only ``\\n``
+    separates lines, as in git and editors: unlike ``str.splitlines``, form
+    feeds and Unicode line separators stay inside their line, and a CRLF file
+    keeps each ``\\r``.
 
     Example:
         ``split_lines("a\\nb\\n")`` returns ``["a", "b"]``; ``split_lines("")`` returns ``[]``.
     """
-    raise NotImplementedError
+    lines = text.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def line_text(lines: list[str], start: int, end: int) -> str:
     """Return lines ``start`` through ``end`` (1-based, inclusive) joined with newlines."""
-    raise NotImplementedError
+    return "\n".join(lines[start - 1 : end])
 
 
 def make_chunk(
@@ -48,4 +55,17 @@ def make_chunk(
         A chunk with ``id=UNASSIGNED``, ``embed_text`` equal to ``raw_text``, and
         empty ``lexical_text``; ``cqa.chunking.enrich.finalize`` completes both.
     """
-    raise NotImplementedError
+    text = line_text(lines, start, end) if raw_text is None else raw_text
+    return Chunk(
+        id=UNASSIGNED,
+        path=f.path,
+        start_line=start,
+        end_line=end,
+        citable=citable or (start, end),
+        kind=kind,
+        symbol=symbol,
+        raw_text=text,
+        embed_text=text,
+        lexical_text="",
+        token_count=count_tokens(text),
+    )

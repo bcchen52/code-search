@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from cqa.chunking.fixed import FixedWindowChunker
 from cqa.config import IndexConfig
+from cqa.errors import ConfigError
 from cqa.types import Chunker
 
 
@@ -11,5 +13,10 @@ def make_chunker(cfg: IndexConfig) -> Chunker:
 
     ``fixed`` returns a ``FixedWindowChunker``; ``ast`` returns an ``AstChunker``,
     which itself falls back to fixed windows for files it cannot parse.
+
+    Raises:
+        ConfigError: If the chunker is not available; only ``fixed`` is, for now.
     """
-    raise NotImplementedError
+    if cfg.chunker == "fixed":
+        return FixedWindowChunker(cfg.fallback_window_lines, cfg.fallback_overlap_lines)
+    raise ConfigError(f"index.chunker: the {cfg.chunker!r} chunker is not available yet")

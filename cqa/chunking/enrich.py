@@ -12,7 +12,10 @@ code body lacks::
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from cqa.config import IndexConfig
+from cqa.errors import ConfigError
 from cqa.types import Chunk, SourceFile
 
 VERSION = 1
@@ -53,5 +56,14 @@ def finalize(chunk: Chunk, f: SourceFile, cfg: IndexConfig, imports: list[str] |
         cfg: The index configuration.
         imports: ``file_imports(f)``, when the caller has computed it once for
             all of the file's chunks; computed here when omitted.
+
+    Raises:
+        ConfigError: If the ``lexical`` store is configured; BM25 text is not available yet.
     """
-    raise NotImplementedError
+    if "lexical" in cfg.stores:
+        raise ConfigError("index.stores: the lexical store is not available yet")
+    embed_text = chunk.embed_text
+    if cfg.enrich_header:
+        imports = file_imports(f) if imports is None else imports
+        embed_text = f"{header(chunk, f.language, imports)}\n{embed_text}"
+    return replace(chunk, embed_text=embed_text)
