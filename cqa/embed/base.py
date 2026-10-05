@@ -15,14 +15,18 @@ def l2_normalize(x: np.ndarray) -> np.ndarray:
 
     Normalized vectors make cosine similarity a dot product.
     """
-    raise NotImplementedError
+    x = np.asarray(x, dtype=np.float32)
+    norms = np.linalg.norm(x, axis=1, keepdims=True)
+    unit: np.ndarray = (x / np.maximum(norms, 1e-12)).astype(np.float32)
+    return unit
 
 
 def truncate(x: np.ndarray, dims: int) -> np.ndarray:
     """Keep the first ``dims`` columns and renormalize each row."""
-    raise NotImplementedError
+    return l2_normalize(x[:, :dims])
 
 
 def batched(items: Sequence[T], size: int) -> Iterator[Sequence[T]]:
     """Yield consecutive slices of at most ``size`` items."""
-    raise NotImplementedError
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
