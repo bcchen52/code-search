@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from tree_sitter import Parser, Query
 
@@ -41,7 +41,15 @@ def detect_language(path: str, first_line: str) -> str | None:
     Example:
         ``detect_language("bin/tool", "#!/usr/bin/env python3")`` returns ``"python"``.
     """
-    raise NotImplementedError
+    suffix = PurePosixPath(path).suffix.lower()
+    language = CODE_EXTENSIONS.get(suffix) or TEXT_EXTENSIONS.get(suffix)
+    if language or not first_line.startswith("#!"):
+        return language
+    words = first_line[2:].split()
+    program = words[0].rsplit("/", 1)[-1] if words else ""
+    if program == "env":
+        program = next((w for w in words[1:] if not w.startswith("-")), "")
+    return next((lang for key, lang in SHEBANG_INTERPRETERS.items() if key in program), None)
 
 
 def get_parser(language: str) -> Parser:
