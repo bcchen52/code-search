@@ -11,7 +11,7 @@ from __future__ import annotations
 
 def is_low_confidence(top_score: float | None, tau: float | None) -> bool:
     """Return True when the gate is enabled, a score exists, and ``top_score < tau``."""
-    raise NotImplementedError
+    return tau is not None and top_score is not None and top_score < tau
 
 
 def tune_tau(answerable_scores: list[float], unanswerable_scores: list[float]) -> tuple[float, float]:

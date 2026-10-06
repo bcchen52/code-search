@@ -14,4 +14,10 @@ class DenseRetriever:
 
     def retrieve(self, question: str, k: int) -> list[Scored]:
         """Embed the question in query mode and return the top ``k`` chunks with ``source="dense"``."""
-        raise NotImplementedError
+        if k <= 0:
+            return []
+        query = self.embedder.embed([question], "query")[0]
+        return [
+            Scored(chunk_id=cid, score=score, rank=i + 1, source="dense")
+            for i, (cid, score) in enumerate(self.store.search(query, k))
+        ]

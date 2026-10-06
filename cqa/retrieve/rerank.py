@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from cqa.config import RerankConfig
+from cqa.errors import ConfigError
 from cqa.types import Chunk, Reranker, Scored
 
 
@@ -20,7 +21,9 @@ class NoopReranker:
 
     def rerank(self, question: str, chunks: list[Chunk], keep: int) -> list[Scored]:
         """Return the first ``keep`` chunks in the given order with ``source="rerank"`` and score 0.0."""
-        raise NotImplementedError
+        return [
+            Scored(chunk_id=c.id, score=0.0, rank=i + 1, source="rerank") for i, c in enumerate(chunks[:keep])
+        ]
 
 
 class CrossEncoderReranker:
@@ -51,6 +54,11 @@ def make_reranker(cfg: RerankConfig) -> Reranker:
     """Return the reranker selected by ``cfg.model``: ``none``, ``cross-encoder``, or ``llm``.
 
     Raises:
-        ConfigError: If a model-backed reranker has no ``model_id``.
+        ConfigError: If a model-backed reranker has no ``model_id``, or is not
+            available yet (only ``none`` is, for now).
     """
-    raise NotImplementedError
+    if cfg.model == "none":
+        return NoopReranker()
+    if cfg.model_id is None:
+        raise ConfigError(f"rerank.model_id: the {cfg.model!r} reranker needs a model id")
+    raise ConfigError(f"rerank.model: the {cfg.model!r} reranker is not available yet")
