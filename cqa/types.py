@@ -113,6 +113,11 @@ class Usage:
         cache_write_tokens: Input tokens written to the provider's prompt cache.
         cached: True when the response came from the local response cache,
             so the call cost nothing.
+        model: The model that produced the response, which differs from the
+            requested one when a refusal fell back to another model.
+        stop_reason: Why generation stopped: ``end_turn``, ``max_tokens``
+            (the answer is cut off), ``refusal`` (the answer was declined and
+            any partial text must be discarded), or another provider value.
     """
 
     tokens_in: int
@@ -120,6 +125,8 @@ class Usage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     cached: bool = False
+    model: str = ""
+    stop_reason: str | None = None
 
 
 class Chunker(Protocol):

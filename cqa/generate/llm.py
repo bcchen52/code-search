@@ -7,11 +7,22 @@ and without it every repeat would return the first cached response.
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
+from collections.abc import Iterator
+from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
-from cqa.config import GenerateConfig
+from cqa.config import GenerateConfig, canonical_json
+from cqa.errors import ConfigError
+from cqa.generate.prompts import prompt_hash, render
 from cqa.types import Context, Generation, Usage
+
+FALLBACK_BETA = "server-side-fallback-2026-07-01"
+"""Beta header for server-side fallback; a refused request is retried on another model in the same call."""
+
+_THINKING_OFF_MAX_EFFORT = ("low", "medium", "high")
 
 
 class CompletionClient(Protocol):
@@ -37,19 +48,41 @@ class LlmCache:
         The key is a SHA-256 hex digest over the model, the canonical JSON of
         ``params``, the prompt, and the repeat index.
         """
-        raise NotImplementedError
+        return hashlib.sha256(f"{model}|{canonical_json(params)}|{prompt}|{repeat}".encode()).hexdigest()
 
     def get(self, key: str) -> tuple[str, Usage] | None:
         """Return a cached response and the usage of the call that produced it, or None."""
-        raise NotImplementedError
+        row = self.conn.execute(
+            "SELECT response, tokens_in, tokens_out FROM llm_cache WHERE key = ?", (key,)
+        ).fetchone()
+        if row is None:
+            return None
+        return row["response"], Usage(tokens_in=row["tokens_in"] or 0, tokens_out=row["tokens_out"] or 0)
 
     def put(self, key: str, text: str, usage: Usage) -> None:
         """Store a completed response. Callers never store partial output from a failed stream."""
-        raise NotImplementedError
+        with self.conn:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO llm_cache (key, response, tokens_in, tokens_out, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    key,
+                    text,
+                    usage.tokens_in,
+                    usage.tokens_out,
+                    datetime.now(UTC).isoformat(timespec="seconds"),
+                ),
+            )
 
 
 class AnthropicGenerator:
-    """Streams answers from an Anthropic model. Reads ``ANTHROPIC_API_KEY`` on first use."""
+    """Streams answers from an Anthropic model. Reads ``ANTHROPIC_API_KEY`` on first use.
+
+    Requests opt into server-side fallback, so a request the model declines
+    can be answered by another model within the same call. ``Usage.model`` and
+    ``Usage.stop_reason`` record which model answered and why it stopped. See
+    docs/decisions/D52-generation-outcomes.md.
+    """
 
     def __init__(
         self,
@@ -71,12 +104,84 @@ class AnthropicGenerator:
 
         The returned generation yields text deltas; its ``usage`` is set when
         the stream ends. A cache hit yields the cached text as a single delta,
-        with ``usage.cached`` set. Only a completed stream is cached.
+        with ``usage.cached`` set. Only a stream that ends normally
+        (``end_turn``) on the requested model is cached: a refusal, a
+        truncated answer, a fallback answer, or a stream that fails midway is
+        never stored.
 
         Raises:
             PromptNotFoundError: If the configured prompt version does not exist.
+            ConfigError: If thinking is off at ``xhigh`` or ``max`` effort,
+                which the model rejects.
         """
-        raise NotImplementedError
+        if self.cfg.thinking == "off" and self.cfg.effort not in _THINKING_OFF_MAX_EFFORT:
+            raise ConfigError(f"generate.effort {self.cfg.effort!r} needs thinking: adaptive")
+        return _AnthropicGeneration(self, render(self.cfg.prompt_version, self.repo, self.sha, ctx, question))
+
+    def params(self) -> dict[str, Any]:
+        """The request settings that, with the model and prompt, determine a response."""
+        return {
+            "thinking": self.cfg.thinking,
+            "effort": self.cfg.effort,
+            "max_tokens": self.cfg.max_tokens,
+            "fallbacks": "default",
+        }
+
+    def client(self) -> Any:
+        """The Anthropic client, created once, on first use."""
+        if self._client is None:
+            import anthropic
+
+            self._client = anthropic.Anthropic()
+        return self._client
+
+
+class _AnthropicGeneration:
+    """One call: iterate for text deltas; ``usage`` is set once iteration completes."""
+
+    def __init__(self, gen: AnthropicGenerator, prompt: str) -> None:
+        self.gen = gen
+        self.prompt = prompt
+        self.prompt_hash = prompt_hash(prompt)
+        self.usage: Usage | None = None
+
+    def __iter__(self) -> Iterator[str]:
+        cfg, cache = self.gen.cfg, self.gen.cache
+        key = LlmCache.key(cfg.model, self.gen.params(), self.prompt, self.gen.repeat)
+        hit = cache.get(key) if cache is not None else None
+        if hit is not None:
+            text, usage = hit
+            self.usage = replace(usage, cached=True, model=cfg.model, stop_reason="end_turn")
+            if text:
+                yield text
+            return
+
+        thinking = {"type": "between_tools"} if cfg.thinking == "off" else {"type": "adaptive"}
+        parts: list[str] = []
+        with self.gen.client().beta.messages.stream(
+            model=cfg.model,
+            max_tokens=cfg.max_tokens,
+            thinking=thinking,
+            output_config={"effort": cfg.effort},
+            messages=[{"role": "user", "content": self.prompt}],
+            betas=[FALLBACK_BETA],
+            fallbacks="default",
+        ) as stream:
+            for text in stream.text_stream:
+                parts.append(text)
+                yield text
+            final = stream.get_final_message()
+        u = final.usage
+        self.usage = Usage(
+            tokens_in=u.input_tokens,
+            tokens_out=u.output_tokens,
+            cache_read_tokens=u.cache_read_input_tokens or 0,
+            cache_write_tokens=u.cache_creation_input_tokens or 0,
+            model=final.model,
+            stop_reason=final.stop_reason,
+        )
+        if cache is not None and final.stop_reason == "end_turn" and final.model == cfg.model:
+            cache.put(key, "".join(parts), self.usage)
 
 
 def cost_usd(model: str, usage: Usage, prices: dict[str, Any]) -> float:

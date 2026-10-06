@@ -52,3 +52,33 @@ def test_malformed_tokens_are_not_citations():
 
 def test_markdown_brackets_are_not_attempts():
     assert find_malformed("See [Config](docs/config.md) and the [CHANGELOG].") == []
+
+
+def spans_text(text):
+    return [text[a:b] for a, b in split_sentences(text)]
+
+
+def test_abbreviations_do_not_end_sentences():
+    assert spans_text("Use a helper, e.g. `refresh` [C1]. Then stop.") == [
+        "Use a helper, e.g. `refresh` [C1].",
+        "Then stop.",
+    ]
+    assert len(split_sentences("It works, i.e. Tokens expire [C2].")) == 1
+
+
+def test_question_and_exclamation_marks_end_sentences():
+    assert spans_text("Is it cached? Yes [C2]! Done.") == ["Is it cached?", "Yes [C2]!", "Done."]
+
+
+def test_text_without_final_punctuation_is_a_sentence():
+    assert spans_text("It is read [C1]. no capital after this") == ["It is read [C1]. no capital after this"]
+    assert spans_text("A trailing fragment [C1]") == ["A trailing fragment [C1]"]
+
+
+def test_empty_and_backticked_dots():
+    assert split_sentences("") == []
+    assert len(split_sentences("Call `a. B` here [C1]. Done.")) == 2
+
+
+def test_labels_are_normalized():
+    assert labels("See [C03:L5-9].") == [("C3", (5, 9), 0)]

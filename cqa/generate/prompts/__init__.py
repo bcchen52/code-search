@@ -10,11 +10,16 @@ traces back to the exact prompt that produced it.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from pathlib import Path
 
+from cqa.errors import PromptNotFoundError
 from cqa.types import Chunk, Context
 
 PROMPTS_DIR = Path(__file__).parent
+
+_VERSION = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 LOW_CONFIDENCE_NOTICE = (
     "Note: the excerpts below scored low for relevance to this question. Answer only "
@@ -26,9 +31,14 @@ def load_template(version: str) -> str:
     """Return the text of ``<version>.txt``.
 
     Raises:
-        PromptNotFoundError: If no template exists for the version.
+        PromptNotFoundError: If no template exists for the version. A version
+            that is not lowercase letters, digits, and hyphens never names a
+            file, so it can never reach outside this package.
     """
-    raise NotImplementedError
+    path = PROMPTS_DIR / f"{version}.txt"
+    if not _VERSION.fullmatch(version) or not path.is_file():
+        raise PromptNotFoundError(f"no prompt template {version!r}")
+    return path.read_text()
 
 
 def format_excerpt(label: str, chunk: Chunk) -> str:
@@ -47,7 +57,21 @@ def format_excerpt(label: str, chunk: Chunk) -> str:
              ...
             </code>
     """
-    raise NotImplementedError
+    describe = " ".join(part for part in (chunk.kind, chunk.symbol) if part and part != "window")
+    if chunk.kind == "class_skeleton":
+        describe += f"; cite L{chunk.citable[0]}-{chunk.citable[1]} only"
+    header = f"[{label}] {chunk.path} L{chunk.start_line}-{chunk.end_line}"
+    if describe:
+        header += f" ({describe})"
+    if chunk.kind == "class_skeleton":
+        body = chunk.raw_text
+    else:
+        width = len(str(chunk.end_line))
+        body = "\n".join(
+            f"{n:>{width}} | {line}".rstrip(" ") if line else f"{n:>{width}} |"
+            for n, line in enumerate(chunk.raw_text.split("\n"), start=chunk.start_line)
+        )
+    return f"{header}\n<code>\n{body}\n</code>"
 
 
 def render(version: str, repo: str, sha: str, ctx: Context, question: str, label_prefix: str = "C") -> str:
@@ -69,9 +93,16 @@ def render(version: str, repo: str, sha: str, ctx: Context, question: str, label
     Raises:
         PromptNotFoundError: If no template exists for the version.
     """
-    raise NotImplementedError
+    excerpts = "\n\n".join(format_excerpt(f"{label_prefix}{i}", c) for i, c in enumerate(ctx.chunks, start=1))
+    return load_template(version).format(
+        repo=repo,
+        sha=sha,
+        excerpts=excerpts,
+        question=question,
+        low_confidence_notice=LOW_CONFIDENCE_NOTICE if ctx.low_confidence else "",
+    )
 
 
 def prompt_hash(prompt: str) -> str:
     """Return the SHA-256 hex digest of a rendered prompt."""
-    raise NotImplementedError
+    return hashlib.sha256(prompt.encode()).hexdigest()
