@@ -45,16 +45,34 @@ def assemble(
     Raises:
         ValueError: If a merging order is configured without ``read_lines``.
     """
-    raise NotImplementedError
+    if cfg.order != "rank" and read_lines is None:
+        raise ValueError(f"context order {cfg.order!r} merges chunks, so it needs read_lines")
+    selected = fit_budget([chunks[s.chunk_id] for s in ranked], cfg.budget_tokens)
+    ordered = selected
+    if cfg.order != "rank" and read_lines is not None:
+        merged = merge_overlapping(selected, read_lines)
+        ordered = order_by_file(merged) if cfg.order == "by_file_best_first" else order_ends(merged)
+    return Context(
+        chunks=ordered, token_count=sum(c.token_count for c in selected), low_confidence=low_confidence
+    )
 
 
 def fit_budget(chunks_in_rank_order: list[Chunk], budget: int) -> list[Chunk]:
     """Return the longest prefix whose token counts sum to at most ``budget``.
 
     Evaluation measures recall at a token budget with the same rule, so the
-    metric scores exactly the evidence the generator would see.
+    metric scores exactly the evidence the generator would see. Selection
+    stops at the first chunk that does not fit; a smaller chunk after it is
+    not considered, and no chunk is ever truncated.
     """
-    raise NotImplementedError
+    selected: list[Chunk] = []
+    total = 0
+    for c in chunks_in_rank_order:
+        if total + c.token_count > budget:
+            break
+        selected.append(c)
+        total += c.token_count
+    return selected
 
 
 def merge_overlapping(chunks: list[Chunk], read_lines: LineReader) -> list[Chunk]:

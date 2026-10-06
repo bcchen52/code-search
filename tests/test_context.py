@@ -89,3 +89,18 @@ def test_skeletons_never_merge():
 def test_order_ends_puts_the_best_at_both_ends():
     ranked = [chunk(i, f"f{i}.py", 1, 2) for i in range(1, 7)]
     assert [c.id for c in order_ends(ranked)] == [1, 3, 5, 6, 4, 2]
+
+
+def test_rank_order_never_reads_source():
+    def refuse(path, start, end):
+        raise AssertionError("rank order must not merge")
+
+    chunks = {1: chunk(1, "a.py", 1, 10), 2: chunk(2, "a.py", 5, 15)}
+    ctx = assemble(scored([1, 2]), chunks, RANK, low_confidence=False, read_lines=refuse)
+    assert [c.id for c in ctx.chunks] == [1, 2]
+
+
+def test_a_zero_budget_selects_nothing():
+    cfg = ContextConfig(budget_tokens=0, order="rank")
+    ctx = assemble(scored([1]), {1: chunk(1, "a.py", 1, 3)}, cfg, low_confidence=False)
+    assert ctx.chunks == [] and ctx.token_count == 0
