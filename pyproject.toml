@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-llm = ["anthropic>=0.40"]
+llm = ["anthropic>=1,<2"]
 local = ["sentence-transformers>=3", "einops>=0.7"]
 voyage = ["voyageai>=0.3"]
 hnsw = ["hnswlib>=0.8"]
