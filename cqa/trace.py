@@ -9,7 +9,8 @@ JSON form. ``Event`` is the incremental form streamed to clients; the final
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, Literal
 
 from cqa.types import Scored
@@ -63,7 +64,13 @@ class CitationRecord:
 
 @dataclass
 class Trace:
-    """Everything recorded about one answer."""
+    """Everything recorded about one answer.
+
+    ``model`` is the model that produced the answer, which differs from the
+    configured one after a fallback; ``stop_reason`` is why generation
+    stopped. On a refusal ``answer`` is empty: any partial text was
+    discarded. ``malformed`` lists citation attempts that broke the grammar.
+    """
 
     question: str
     index_id: str
@@ -87,16 +94,32 @@ class Trace:
     tokens_out: int = 0
     cost_usd: float = 0.0
     cached: bool = False
+    model: str = ""
+    stop_reason: str | None = None
+    malformed: list[str] = field(default_factory=list)
     error: str | None = None
 
     def to_json(self) -> str:
         """Serialize to a single line of JSON; nested dataclasses become objects and tuples lists."""
-        raise NotImplementedError
+        return json.dumps(asdict(self), separators=(",", ":"), ensure_ascii=False)
 
     @classmethod
     def from_json(cls, text: str) -> Trace:
         """Parse a trace written by ``to_json``, restoring nested types.
 
-        ``Trace.from_json(t.to_json()) == t`` holds for every trace.
+        ``Trace.from_json(t.to_json()) == t`` holds for every trace. Keys this
+        version does not know are ignored, and missing ones take their
+        defaults, so stored traces stay readable as fields are added.
         """
-        raise NotImplementedError
+        raw = json.loads(text)
+        known = {f.name for f in fields(cls)}
+        d = {k: v for k, v in raw.items() if k in known}
+        d["lists"] = {name: [Scored(**s) for s in ranked] for name, ranked in d.get("lists", {}).items()}
+        d["fused"] = [Scored(**s) for s in d.get("fused", [])]
+        d["reranked"] = [Scored(**s) for s in d.get("reranked", [])]
+        d["context"] = [ContextEntry(**{**e, "citable": tuple(e["citable"])}) for e in d.get("context", [])]
+        d["citations"] = [
+            CitationRecord(**{**c, "lines": tuple(c["lines"]) if c["lines"] is not None else None})
+            for c in d.get("citations", [])
+        ]
+        return cls(**d)

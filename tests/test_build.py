@@ -210,5 +210,7 @@ def test_the_index_command_builds_then_reuses(toyrepo, tmp_path, monkeypatch):
 def test_the_index_command_reports_bad_input(toyrepo, tmp_path, monkeypatch):
     repo, _ = toyrepo
     monkeypatch.setenv("CQA_DATA_DIR", str(tmp_path / "data"))
-    result = CliRunner().invoke(app, ["index", str(repo), "--commit", "abc123"])
-    assert result.exit_code == 1 and "40-character" in result.stderr
+    result = CliRunner().invoke(app, ["index", str(repo), "--commit", "nosuchbranch"])
+    assert result.exit_code == 1 and "'nosuchbranch' is not a commit" in result.stderr
+    result = CliRunner().invoke(app, ["index", "https://example.com/r.git"])
+    assert result.exit_code == 1 and "--commit is required" in result.stderr

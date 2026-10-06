@@ -127,6 +127,21 @@ def clone_at(url: str, commit: str, dest: Path) -> Path:
     return dest
 
 
+def resolve_commit(repo_dir: Path, rev: str = "HEAD") -> str:
+    """Return the full SHA of ``rev`` in a local repository, reading only refs and objects.
+
+    Raises:
+        IndexBuildError: If ``rev`` does not name a commit there.
+    """
+    if rev.startswith("-"):
+        raise ValueError(f"not a revision: {rev!r}")
+    try:
+        out = _git(repo_dir, "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}", stage="resolve")
+    except IndexBuildError as e:
+        raise IndexBuildError(f"{rev!r} is not a commit in {repo_dir}") from e
+    return out.decode().strip()
+
+
 def list_tree(repo_dir: Path, commit: str) -> list[tuple[str, str]]:
     """Return ``(path, blob_sha)`` for every regular file at ``commit``.
 

@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from cqa.generate.citations import Citation
+from cqa.generate.citations import Citation, split_sentences
+from cqa.retrieve.query import extract_identifiers
 from cqa.types import Chunk
 
 
@@ -45,7 +46,9 @@ class Verification:
     @property
     def validity(self) -> float | None:
         """Share of citations that are valid, or None when the answer has no citations."""
-        raise NotImplementedError
+        if not self.checks:
+            return None
+        return sum(c.status == "valid" for c in self.checks) / len(self.checks)
 
 
 def verify(answer: str, citations: list[Citation], labels: dict[str, Chunk]) -> Verification:
@@ -59,8 +62,31 @@ def verify(answer: str, citations: list[Citation], labels: dict[str, Chunk]) -> 
         answer: The answer text.
         citations: Citations parsed from the answer.
         labels: The chunk behind each label shown to the model.
+
+    Returns:
+        One check per citation, in order, and the indexes of sentences that
+        name code but carry no citation. A sentence with only a fabricated
+        citation counts as cited; the fabrication is reported by its check.
     """
-    raise NotImplementedError
+    checks = []
+    for c in citations:
+        chunk = labels.get(c.label)
+        if chunk is None:
+            checks.append(CitationCheck(c, "fabricated", None, None))
+        elif c.lines is None:
+            checks.append(CitationCheck(c, "valid", chunk.path, chunk.citable))
+        else:
+            lo, hi = chunk.citable
+            a, b = c.lines
+            status: Literal["valid", "out_of_range"] = "valid" if lo <= a <= b <= hi else "out_of_range"
+            checks.append(CitationCheck(c, status, chunk.path, c.lines))
+    cited = {c.sentence for c in citations}
+    uncited = [
+        i
+        for i, (start, end) in enumerate(split_sentences(answer))
+        if i not in cited and names_code(answer[start:end])
+    ]
+    return Verification(checks=checks, uncited_sentences=uncited)
 
 
 def names_code(sentence: str) -> bool:
@@ -69,4 +95,4 @@ def names_code(sentence: str) -> bool:
     The test is ``cqa.retrieve.query.extract_identifiers``, the same one that
     decides whether a question triggers symbol lookup.
     """
-    raise NotImplementedError
+    return bool(extract_identifiers(sentence))

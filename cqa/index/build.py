@@ -28,7 +28,7 @@ from cqa.config import IndexConfig, canonical_json
 from cqa.embed.base import batched
 from cqa.errors import ConfigError, IndexBuildError, IndexNotReadyError, NotFoundError
 from cqa.index.vector_store import make_store, read_vectors, write_vectors
-from cqa.ingest.walker import SkippedFile, read_blobs, walk
+from cqa.ingest.walker import SkippedFile, read_blobs, resolve_commit, walk
 from cqa.types import Chunk, Chunker, Embedder, SourceFile, VectorStore
 
 OnStage = Callable[[str, float], None]
@@ -127,6 +127,25 @@ def stage_versions(chunker: Chunker, cfg: IndexConfig) -> str:
     if unavailable:
         raise ConfigError(f"index.stores: {', '.join(unavailable)} not available yet")
     return f"{chunker.version}+enrich-{enrich.VERSION}"
+
+
+def resolve_repo(repo: str, commit: str | None) -> tuple[str, str]:
+    """Return ``(repository URL, full commit SHA)`` for a local path or a URL.
+
+    A local repository is named by its absolute path, so one repository
+    always has one identity, and ``commit`` defaults to its ``HEAD``. A URL
+    needs an explicit commit.
+
+    Raises:
+        ValueError: If a URL has no commit.
+        IndexBuildError: If a local revision does not resolve to a commit.
+    """
+    local = Path(repo).expanduser()
+    if local.is_dir():
+        return str(local.resolve()), resolve_commit(local.resolve(), commit or "HEAD")
+    if commit is None:
+        raise ValueError(f"--commit is required for a remote repository: {repo}")
+    return repo, commit
 
 
 def checkout_dir(data_dir: Path, repo_url: str, commit: str) -> Path:
