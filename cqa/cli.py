@@ -1,7 +1,9 @@
-"""The ``cqa`` command line: index, ask, and config."""
+"""The ``cqa`` command line: index, ask, config, and worker."""
 
 from __future__ import annotations
 
+import os
+import socket
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -17,6 +19,7 @@ from cqa.errors import CqaError
 from cqa.generate.answer import build_answerer
 from cqa.index.build import build_index, checkout_dir, resolve_repo
 from cqa.ingest.walker import clone_at
+from cqa.serve.worker import run_worker
 
 app = typer.Typer(
     help="Question answering over a codebase, with line-level citations.",
@@ -148,6 +151,20 @@ def _print_outcome(data: dict[str, Any], show_trace: bool) -> None:
             typer.echo(f"{name}: {top}")
         typer.echo("timings (ms): " + ", ".join(f"{k} {v:.1f}" for k, v in data["timings_ms"].items()))
         typer.echo(f"tokens: {t.tokens_in} in, {t.tokens_out} out")
+
+
+@app.command()
+def worker(
+    worker_id: Annotated[str | None, typer.Option(help="Worker name; defaults to <hostname>-<pid>.")] = None,
+) -> None:
+    """Run the index-job worker until interrupted."""
+    name = worker_id or f"{socket.gethostname()}-{os.getpid()}"
+    root = data_dir()
+    typer.echo(f"worker {name} watching {root}")
+    try:
+        run_worker(root, name)
+    except KeyboardInterrupt:
+        typer.echo(f"worker {name} stopped")
 
 
 @app.command("config")
