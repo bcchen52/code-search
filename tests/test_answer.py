@@ -207,7 +207,8 @@ def test_build_answerer_wires_everything_and_defaults_to_head(toyrepo, tmp_path,
     cfg = load_config(ROOT / "configs/base.yaml")
     answerer = build_answerer(cfg, str(repo), None, tmp_path)
     assert answerer.commit == sha and answerer.repo == repo.name
-    assert answerer.config_hash == config_hash(cfg) and answerer.prices is None
+    assert answerer.config_hash == config_hash(cfg)
+    assert answerer.prices["usd_per_million_tokens"]["claude-sonnet-5-5"]["input"] == 2.0
     assert isinstance(answerer.generator, AnthropicGenerator)
     assert isinstance(answerer.generator.cache, LlmCache)
     assert answerer.pipeline.index.store is not None
@@ -232,6 +233,7 @@ def test_the_ask_command_prints_the_answer_and_its_citations(toyrepo, tmp_path, 
     assert "[C1]  src/" in result.stdout and "valid" in result.stdout
     assert "[C9]  (no such excerpt)  fabricated" in result.stdout
     assert "timings (ms):" in result.stdout and "dense:" in result.stdout
+    assert "cost $0.0022" in result.stdout
 
 
 def test_the_ask_command_reports_a_declined_answer(toyrepo, tmp_path, monkeypatch):
@@ -263,3 +265,28 @@ def test_a_local_revision_resolves_to_its_full_sha(toyrepo):
     git("branch", "feature", cwd=repo)
     assert resolve_repo(str(repo), "feature") == (str(repo.resolve()), sha)
     assert resolve_repo(str(repo), sha[:8])[1] == sha
+
+
+def test_every_trace_carries_its_cost(toy):
+    answerer, _ = toy()
+    answerer.prices = {
+        "as_of": "x",
+        "usd_per_million_tokens": {"claude-sonnet-5-5": {"input": 2.0, "output": 10.0}},
+    }
+    trace = answerer.run(QUESTION)
+    assert trace.cost_usd == pytest.approx((900 * 2.0 + 40 * 10.0) / 1e6)
+
+
+def test_a_cached_answer_costs_nothing(toy):
+    answerer, _ = toy(FakeGenerator(cached=True))
+    answerer.prices = {"as_of": "x", "usd_per_million_tokens": {}}
+    assert answerer.run(QUESTION).cost_usd == 0.0
+
+
+def test_build_answerer_refuses_to_run_without_prices(toyrepo, tmp_path, monkeypatch):
+    repo, _ = toyrepo
+    fake_index_embedder(monkeypatch)
+    with pytest.raises(CqaError, match="price table"):
+        build_answerer(
+            load_config(ROOT / "configs/base.yaml"), str(repo), None, tmp_path, tmp_path / "none.yaml"
+        )

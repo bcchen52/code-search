@@ -12,12 +12,15 @@ import sqlite3
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol
+
+import yaml
 
 from cqa.config import GenerateConfig, canonical_json
 from cqa.errors import ConfigError
 from cqa.generate.prompts import prompt_hash, render
-from cqa.types import Context, Generation, Usage
+from cqa.types import Attempt, Context, Generation, Usage
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 """Beta header for server-side fallback; a refused request is retried on another model in the same call."""
@@ -172,6 +175,17 @@ class _AnthropicGeneration:
                 yield text
             final = stream.get_final_message()
         u = final.usage
+        attempts = tuple(
+            Attempt(
+                model=a.model,
+                tokens_in=a.input_tokens,
+                tokens_out=a.output_tokens,
+                cache_read_tokens=a.cache_read_input_tokens or 0,
+                cache_write_tokens=a.cache_creation_input_tokens or 0,
+            )
+            for a in (getattr(u, "iterations", None) or [])
+            if getattr(a, "model", None)
+        )
         self.usage = Usage(
             tokens_in=u.input_tokens,
             tokens_out=u.output_tokens,
@@ -179,6 +193,7 @@ class _AnthropicGeneration:
             cache_write_tokens=u.cache_creation_input_tokens or 0,
             model=final.model,
             stop_reason=final.stop_reason,
+            attempts=attempts if len(attempts) > 1 else (),
         )
         if cache is not None and final.stop_reason == "end_turn" and final.model == cfg.model:
             cache.put(key, "".join(parts), self.usage)
@@ -189,9 +204,64 @@ def cost_usd(model: str, usage: Usage, prices: dict[str, Any]) -> float:
 
     Prompt-cache reads and writes are priced at the model's ``cached_input``
     and ``cache_write`` rates. A response from the local cache costs nothing.
+    When ``usage.attempts`` lists several attempts (a refusal that fell back
+    to another model), each is priced at its own model's rates and ``model``
+    is not used; this counts every reported attempt, an upper bound on the
+    bill.
+
+    Example:
+        At $2 input and $10 output per million tokens, 3,300 tokens in and
+        400 out cost ``(3300 * 2 + 400 * 10) / 1e6 = 0.0106``.
 
     Raises:
-        ConfigError: If the model has no price entry. An unpriced model is an
-            error rather than a silent zero.
+        ConfigError: If a model has no price entry, or a price the call needs
+            is null. An unpriced model is an error rather than a silent zero.
     """
-    raise NotImplementedError
+    if usage.cached:
+        return 0.0
+    attempts = usage.attempts or (
+        Attempt(model, usage.tokens_in, usage.tokens_out, usage.cache_read_tokens, usage.cache_write_tokens),
+    )
+    return sum(_attempt_cost(a, prices) for a in attempts)
+
+
+def _attempt_cost(a: Attempt, prices: dict[str, Any]) -> float:
+    table = prices.get("usd_per_million_tokens") or {}
+    if a.model not in table:
+        raise ConfigError(f"configs/prices.yaml: no prices for {a.model!r}")
+    rates = table[a.model] or {}
+    total = 0.0
+    for tokens, rate in (
+        (a.tokens_in, "input"),
+        (a.tokens_out, "output"),
+        (a.cache_read_tokens, "cached_input"),
+        (a.cache_write_tokens, "cache_write"),
+    ):
+        if tokens:
+            if rates.get(rate) is None:
+                raise ConfigError(f"configs/prices.yaml: {a.model} has no {rate} price")
+            total += tokens * float(rates[rate])
+    return total / 1_000_000
+
+
+def load_prices(path: Path) -> dict[str, Any]:
+    """Load and check the dated price table.
+
+    Raises:
+        ConfigError: If the file is missing or unreadable, has no ``as_of``
+            date, or holds a price that is neither a number nor null.
+    """
+    try:
+        prices = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError) as e:
+        raise ConfigError(f"cannot read the price table {path}: {e}") from e
+    if not isinstance(prices, dict) or not prices.get("as_of"):
+        raise ConfigError(f"{path}: the price table needs an as_of date")
+    table = prices.get("usd_per_million_tokens")
+    if not isinstance(table, dict):
+        raise ConfigError(f"{path}: usd_per_million_tokens must map models to prices")
+    for model, rates in table.items():
+        for rate, value in (rates or {}).items():
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
+                raise ConfigError(f"{path}: {model}.{rate} must be a number or null, got {value!r}")
+    return prices

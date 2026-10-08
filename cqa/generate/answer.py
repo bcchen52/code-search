@@ -24,7 +24,7 @@ from cqa.embed import make_embedder
 from cqa.errors import CqaError
 from cqa.generate.citations import find_malformed, parse_citations
 from cqa.generate.context import assemble
-from cqa.generate.llm import AnthropicGenerator, LlmCache, cost_usd
+from cqa.generate.llm import AnthropicGenerator, LlmCache, cost_usd, load_prices
 from cqa.generate.verify import verify
 from cqa.index.build import build_index, checkout_dir, open_index, resolve_repo
 from cqa.ingest.walker import clone_at
@@ -213,12 +213,17 @@ def sources_payload(ctx: Context, reranked: list[Scored]) -> dict[str, Any]:
     return {"sources": sources, "low_confidence": ctx.low_confidence}
 
 
-def build_answerer(cfg: Config, repo: str, commit: str | None, data_dir: Path) -> Answerer:
+DEFAULT_PRICES = Path("configs/prices.yaml")
+
+
+def build_answerer(
+    cfg: Config, repo: str, commit: str | None, data_dir: Path, prices_path: Path = DEFAULT_PRICES
+) -> Answerer:
     """Assemble an answerer from configuration.
 
     Builds or reuses the repository's index, then wires the embedder and its
-    cache, the retrieval pipeline, and the generator and its cache. No prices
-    are passed yet, so answers carry no cost.
+    cache, the retrieval pipeline, and the generator and its cache, and
+    loads the price table so every answer carries its cost.
 
     Args:
         cfg: The pipeline configuration.
@@ -226,12 +231,15 @@ def build_answerer(cfg: Config, repo: str, commit: str | None, data_dir: Path) -
         commit: A commit; None means ``HEAD`` of a local repository (see
             ``cqa.index.build.resolve_repo``).
         data_dir: Where the databases, checkouts, and indexes live.
+        prices_path: The dated price table. A missing table is an error,
+            never free answers.
 
     Raises:
-        CqaError: If the configuration names something unavailable, or the
-            index cannot be built.
+        CqaError: If the configuration names something unavailable, the
+            price table is missing or invalid, or the index cannot be built.
         ValueError: If the repository or commit is invalid.
     """
+    prices = load_prices(prices_path)
     url, commit = resolve_repo(repo, commit)
     conn = connect(data_dir / DB_FILES["main"])
     init_schema(conn, "main")
@@ -245,4 +253,4 @@ def build_answerer(cfg: Config, repo: str, commit: str | None, data_dir: Path) -
     handle = open_index(conn, index_id, data_dir, cfg.index.store)
     pipeline = RetrievalPipeline.from_config(cfg, handle, embedder)
     generator = AnthropicGenerator(cfg.generate, handle.repo_name, commit, cache=LlmCache(caches))
-    return Answerer(cfg, pipeline, generator, handle.repo_name, commit, config_hash(cfg))
+    return Answerer(cfg, pipeline, generator, handle.repo_name, commit, config_hash(cfg), prices)

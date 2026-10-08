@@ -150,7 +150,7 @@ def _print_outcome(data: dict[str, Any], show_trace: bool) -> None:
             top = ", ".join(f"{s.chunk_id} ({s.score:.3f})" for s in ranked[:10])
             typer.echo(f"{name}: {top}")
         typer.echo("timings (ms): " + ", ".join(f"{k} {v:.1f}" for k, v in data["timings_ms"].items()))
-        typer.echo(f"tokens: {t.tokens_in} in, {t.tokens_out} out")
+        typer.echo(f"tokens: {t.tokens_in} in, {t.tokens_out} out; cost ${data['cost_usd']:.4f}")
 
 
 @app.command()

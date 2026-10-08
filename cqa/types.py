@@ -103,6 +103,21 @@ class Context:
 
 
 @dataclass(frozen=True)
+class Attempt:
+    """Token accounting for one model attempt within a call.
+
+    A call that falls back after a refusal makes several attempts, each billed
+    at the rates of the model that ran it.
+    """
+
+    model: str
+    tokens_in: int
+    tokens_out: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+
+@dataclass(frozen=True)
 class Usage:
     """Token accounting for one model call.
 
@@ -118,6 +133,9 @@ class Usage:
         stop_reason: Why generation stopped: ``end_turn``, ``max_tokens``
             (the answer is cut off), ``refusal`` (the answer was declined and
             any partial text must be discarded), or another provider value.
+        attempts: Every attempt the call made, when the provider reports
+            them; empty when the call made a single attempt. The token
+            fields above cover only the attempt that produced the response.
     """
 
     tokens_in: int
@@ -127,6 +145,7 @@ class Usage:
     cached: bool = False
     model: str = ""
     stop_reason: str | None = None
+    attempts: tuple[Attempt, ...] = ()
 
 
 class Chunker(Protocol):

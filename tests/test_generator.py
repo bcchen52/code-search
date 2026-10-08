@@ -25,8 +25,9 @@ def gen_cfg(**changes):
 
 
 class FakeStream:
-    def __init__(self, deltas, model, stop_reason, fail_after=None):
+    def __init__(self, deltas, model, stop_reason, fail_after=None, iterations=None):
         self.deltas, self.model, self.stop_reason, self.fail_after = deltas, model, stop_reason, fail_after
+        self.iterations = iterations
 
     def __enter__(self):
         return self
@@ -43,7 +44,11 @@ class FakeStream:
 
     def get_final_message(self):
         usage = SimpleNamespace(
-            input_tokens=120, output_tokens=30, cache_read_input_tokens=None, cache_creation_input_tokens=None
+            input_tokens=120,
+            output_tokens=30,
+            cache_read_input_tokens=None,
+            cache_creation_input_tokens=None,
+            iterations=self.iterations,
         )
         return SimpleNamespace(model=self.model, stop_reason=self.stop_reason, usage=usage)
 
@@ -196,3 +201,46 @@ def test_a_live_answer():
     assert text.strip()
     assert generation.usage.stop_reason == "end_turn" and generation.usage.tokens_in > 0
     assert generation.usage.model.startswith("claude-")
+
+
+def test_a_fallback_records_every_attempt():
+    iterations = [
+        SimpleNamespace(
+            type="message",
+            model="claude-sonnet-5-5",
+            input_tokens=800,
+            output_tokens=12,
+            cache_read_input_tokens=None,
+            cache_creation_input_tokens=None,
+        ),
+        SimpleNamespace(
+            type="fallback_message",
+            model="claude-sonnet-5",
+            input_tokens=820,
+            output_tokens=30,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        ),
+    ]
+    generation = generator(answer(model="claude-sonnet-5", iterations=iterations)).stream("q", CTX)
+    list(generation)
+    assert [(a.model, a.tokens_in, a.tokens_out) for a in generation.usage.attempts] == [
+        ("claude-sonnet-5-5", 800, 12),
+        ("claude-sonnet-5", 820, 30),
+    ]
+
+
+def test_a_single_attempt_records_no_attempt_list():
+    single = [
+        SimpleNamespace(
+            type="message",
+            model="claude-sonnet-5-5",
+            input_tokens=120,
+            output_tokens=30,
+            cache_read_input_tokens=None,
+            cache_creation_input_tokens=None,
+        )
+    ]
+    generation = generator(answer(iterations=single)).stream("q", CTX)
+    list(generation)
+    assert generation.usage.attempts == ()
