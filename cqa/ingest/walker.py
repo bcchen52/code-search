@@ -127,6 +127,41 @@ def clone_at(url: str, commit: str, dest: Path) -> Path:
     return dest
 
 
+def remote_head(url: str) -> str:
+    """Return the full SHA of a remote repository's default branch, asking over https only.
+
+    Raises:
+        ValueError: If ``url`` is not an https URL.
+        IndexBuildError: If the repository cannot be read or has no ``HEAD``.
+    """
+    if not url.startswith("https://"):
+        raise ValueError(f"remote repositories must use https: {url!r}")
+    cmd = [
+        "git",
+        "-c",
+        "protocol.allow=never",
+        "-c",
+        "protocol.https.allow=always",
+        "ls-remote",
+        "--",
+        url,
+        "HEAD",
+    ]
+    try:
+        out = subprocess.run(
+            cmd, capture_output=True, check=True, timeout=CLONE_TIMEOUT_S, env=_git_env()
+        ).stdout.decode()
+    except subprocess.TimeoutExpired as e:
+        raise IndexBuildError(f"resolve: git timed out reading {url}") from e
+    except subprocess.CalledProcessError as e:
+        message = e.stderr.decode(errors="replace").strip() if e.stderr else f"exit code {e.returncode}"
+        raise IndexBuildError(f"resolve: {message}") from e
+    sha = out.split("\t", 1)[0].strip()
+    if not _FULL_SHA.fullmatch(sha):
+        raise IndexBuildError(f"resolve: {url} has no HEAD commit")
+    return sha
+
+
 def resolve_commit(repo_dir: Path, rev: str = "HEAD") -> str:
     """Return the full SHA of ``rev`` in a local repository, reading only refs and objects.
 

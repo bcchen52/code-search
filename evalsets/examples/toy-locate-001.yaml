@@ -1,0 +1,20 @@
+# An answerable question. Examples live outside evalsets/questions/, so they
+# never enter the dev or test split.
+id: toy-locate-001
+repo: toy
+commit: FIXTURE            # real questions pin a commit SHA; line numbers are valid only there
+split: dev
+category: locate
+answerable: true
+source: handwritten
+question: Where is the session token validated?
+gold_answer: >
+  In SessionManager.validate_token (src/auth/session.py). It decodes the token
+  with _decode, then checks that the session exists, is not revoked, matches
+  the stored token hash, and has not expired, and that its user is active.
+gold_evidence:
+  - span: src/auth/session.py:88-121
+    grade: essential
+  - span: src/auth/session.py:74-86
+    grade: supporting
+alt_evidence_sets: []      # other span sets that fully support the answer

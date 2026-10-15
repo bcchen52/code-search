@@ -79,7 +79,7 @@ Requires Python 3.11 or later and git.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[llm,local,dev]"
+pip install -e ".[llm,local,dev,serve]"
 cp .env.example .env        # then set ANTHROPIC_API_KEY
 set -a && . ./.env && set +a   # export the settings into the shell
 make check                  # lint, type-check, and test
@@ -87,8 +87,10 @@ make check                  # lint, type-check, and test
 
 Settings are read from the environment; nothing loads `.env` automatically.
 
-Optional extras: `voyage` for hosted embeddings, `hnsw` for the hnswlib vector
-store, and `serve` for the HTTP API.
+Extras: `llm` for the answering model, `local` for local embedding models,
+`serve` for the HTTP API, and `dev` for the checks; optional ones are `voyage`
+for hosted embeddings and `hnsw` for the hnswlib vector store. `make install`
+installs `dev` and `serve`, as CI does.
 
 ```bash
 cqa index <repository path or URL> --commit <sha>
@@ -97,6 +99,26 @@ cqa eval run --config configs/base.yaml --hypothesis "baseline" --arms real,orac
 cqa eval compare <run-a> <run-b>
 cqa serve
 ```
+
+### Running the API
+
+The server answers only for repositories on its allowlist, and refuses to
+start without one. Indexing runs in a separate worker process.
+
+```bash
+export CQA_REPO_ALLOWLIST=https://github.com/pallets/itsdangerous   # comma-separated https URLs
+cqa serve &        # http://127.0.0.1:8000; interactive docs at /docs
+cqa worker &       # builds the indexes that POST /repos queues
+
+curl -X POST localhost:8000/repos -H 'content-type: application/json' \
+     -d '{"url": "https://github.com/pallets/itsdangerous"}'              # 202 {"job_id": 1, ...}
+curl localhost:8000/jobs/1                                                 # wait for "state": "ready"
+curl -N -X POST localhost:8000/repos/1/query -H 'content-type: application/json' \
+     -d '{"question": "Where is the signature compared?"}'                 # a stream of SSE frames
+```
+
+Behind a reverse proxy, run `cqa serve --proxy-headers --forwarded-allow-ips <proxy address>`
+so rate limits see each visitor's address rather than the proxy's.
 
 ## Configuration
 

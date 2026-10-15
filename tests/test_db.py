@@ -37,3 +37,20 @@ def test_data_dir_honors_the_environment_and_creates_it(monkeypatch, tmp_path):
     monkeypatch.setenv("CQA_DATA_DIR", str(tmp_path / "store"))
     assert data_dir() == tmp_path / "store"
     assert (tmp_path / "store").is_dir()
+
+
+def test_an_older_database_gains_the_new_columns(tmp_path):
+    conn = connect(tmp_path / "old.sqlite")
+    conn.execute(
+        "CREATE TABLE queries (id INTEGER PRIMARY KEY, index_id TEXT NOT NULL, question TEXT NOT NULL, "
+        "config_hash TEXT NOT NULL, answer TEXT, citations TEXT, timings_ms TEXT, tokens_in INTEGER, "
+        "tokens_out INTEGER, cost_usd REAL, created_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO queries (index_id, question, config_hash, created_at) VALUES ('i', 'q', 'h', 't')"
+    )
+    init_schema(conn, "main")
+    init_schema(conn, "main")
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(queries)")}
+    assert {"trace", "model", "stop_reason"} <= columns
+    assert conn.execute("SELECT COUNT(*) FROM queries").fetchone()[0] == 1

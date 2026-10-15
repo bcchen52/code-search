@@ -1,0 +1,44 @@
+# The repositories in the evaluation set, each pinned to one commit. Line
+# numbers in questions are valid only at these commits.
+#
+# Most questions come from repositories unlikely to appear in any model's
+# training data, which limits answers from memory; the public repositories
+# are the contrast. Closed-book accuracy per repository checks the split.
+
+repos:
+  - name: tiger-compiler
+    url: "<git URL or local path>"
+    commit: "<sha>"
+    language: "<language>"
+    questions: 35                 # deep call chains across compiler passes
+
+  - name: tcp-server
+    url: "<git URL or local path>"
+    commit: "<sha>"
+    language: "<language>"
+    questions: 30                 # systems code, configuration constants, error paths
+
+  - name: multiplix
+    url: "<git URL or local path>"
+    commit: "<sha>"
+    language: python
+    questions: 30                 # web application: auth, settings, ORM, frontend
+
+  - name: "<public library, 20k-60k lines>"
+    url: "<git URL>"
+    commit: "<sha>"
+    language: python
+    questions: 30                 # likely known to models: the memorization contrast
+
+  - name: "<larger public repository, 100k-200k lines>"
+    url: "<git URL>"
+    commit: "<sha>"
+    language: python
+    questions: 25                 # retrieval at scale, with near-duplicate code
+
+  # Used by examples and tests only; never part of dev or test.
+  - name: toy
+    url: tests/fixtures/toyrepo
+    commit: FIXTURE               # the tests create this commit
+    language: python
+    questions: 0

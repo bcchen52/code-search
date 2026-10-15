@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cqa.types import Chunk, Scored
+from cqa.types import Chunk, Scored, Usage
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -89,3 +89,38 @@ def unit_rows(n: int, dims: int, seed: int) -> np.ndarray:
     """n random unit vectors, float32."""
     x = np.random.default_rng(seed).standard_normal((n, dims)).astype(np.float32)
     return x / np.linalg.norm(x, axis=1, keepdims=True)
+
+
+class FakeGeneration:
+    def __init__(self, deltas, usage, fail=False):
+        self.deltas, self.final, self.fail = deltas, usage, fail
+        self.prompt_hash = "p" * 64
+        self.usage = None
+
+    def __iter__(self):
+        yield from self.deltas
+        if self.fail:
+            raise RuntimeError("model unavailable")
+        self.usage = self.final
+
+
+class FakeGenerator:
+    def __init__(
+        self, deltas=("Tokens are checked in `validate_token` [C1]. ", "It raises on expiry [C9]."), **usage
+    ):
+        self.deltas = list(deltas)
+        self.usage = Usage(
+            **{
+                "tokens_in": 900,
+                "tokens_out": 40,
+                "model": "claude-sonnet-5-5",
+                "stop_reason": "end_turn",
+                **usage,
+            }
+        )
+        self.fail = False
+        self.calls = []
+
+    def stream(self, question, ctx):
+        self.calls.append((question, ctx))
+        return FakeGeneration(self.deltas, self.usage, self.fail)

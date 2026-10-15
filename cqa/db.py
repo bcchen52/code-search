@@ -15,6 +15,11 @@ from pathlib import Path
 from typing import Literal
 
 SCHEMAS = {"main": "schema.sql", "caches": "schema_caches.sql"}
+ADDED_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
+    "main": [("queries", "trace", "TEXT"), ("queries", "model", "TEXT"), ("queries", "stop_reason", "TEXT")],
+    "caches": [],
+}
+"""Columns added after a table was first created: ``CREATE TABLE IF NOT EXISTS`` does not add them."""
 DB_FILES = {"main": "cqa.sqlite", "caches": "caches.sqlite"}
 BUSY_TIMEOUT_MS = 5000
 
@@ -45,5 +50,12 @@ def init_schema(conn: sqlite3.Connection, which: Literal["main", "caches"]) -> N
     """Create any missing tables and indexes. Safe to call on an initialized database.
 
     Per-index full-text tables are created by ``cqa.index.lexical``, not here.
+    A database created by an earlier version gains the columns in
+    ``ADDED_COLUMNS`` that it lacks, so existing data is kept.
     """
     conn.executescript(resources.files("cqa").joinpath(SCHEMAS[which]).read_text())
+    for table, column, kind in ADDED_COLUMNS[which]:
+        present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in present:
+            with conn:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")

@@ -193,3 +193,23 @@ def test_clone_at_timeout_is_an_index_build_error(tmp_path, monkeypatch):
     monkeypatch.setattr(walker.subprocess, "run", fake_run)
     with pytest.raises(IndexBuildError, match="timed out"):
         clone_at("https://example.com/r.git", "c" * 40, tmp_path / "dest")
+
+
+def test_remote_head_reads_the_default_branch_over_https_only(monkeypatch):
+    with pytest.raises(ValueError, match="https"):
+        walker.remote_head("git@example.com:a/b.git")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, b"a" * 40 + b"\tHEAD\n", b"")
+
+    monkeypatch.setattr(walker.subprocess, "run", fake_run)
+    assert walker.remote_head("https://example.com/r.git") == "a" * 40
+    assert calls[0][-3:] == ["--", "https://example.com/r.git", "HEAD"] and "protocol.allow=never" in calls[0]
+
+    monkeypatch.setattr(
+        walker.subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, b"", b"")
+    )
+    with pytest.raises(IndexBuildError, match="no HEAD"):
+        walker.remote_head("https://example.com/empty.git")

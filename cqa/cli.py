@@ -1,4 +1,4 @@
-"""The ``cqa`` command line: index, ask, config, and worker."""
+"""The ``cqa`` command line: index, ask, config, serve, and worker."""
 
 from __future__ import annotations
 
@@ -151,6 +151,45 @@ def _print_outcome(data: dict[str, Any], show_trace: bool) -> None:
             typer.echo(f"{name}: {top}")
         typer.echo("timings (ms): " + ", ".join(f"{k} {v:.1f}" for k, v in data["timings_ms"].items()))
         typer.echo(f"tokens: {t.tokens_in} in, {t.tokens_out} out; cost ${data['cost_usd']:.4f}")
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Interface to bind.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to bind.")] = 8000,
+    proxy_headers: Annotated[
+        bool,
+        typer.Option(help="Trust X-Forwarded-For from the proxy, so rate limits see real client addresses."),
+    ] = False,
+    forwarded_allow_ips: Annotated[
+        str, typer.Option(help="Proxy addresses whose forwarding headers are trusted.")
+    ] = "127.0.0.1",
+) -> None:
+    """Run the HTTP API.
+
+    Settings come from the environment (see ``.env.example``); the server
+    refuses to start without a repository allowlist. Index jobs need a
+    separate ``cqa worker``.
+    """
+    try:
+        import uvicorn
+
+        from cqa.serve.api import create_app
+    except ImportError as e:
+        typer.echo(f"the API needs the serve extra: pip install -e '.[serve]' ({e})", err=True)
+        raise typer.Exit(1) from e
+    try:
+        application = create_app()
+    except CqaError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from e
+    uvicorn.run(
+        application,
+        host=host,
+        port=port,
+        proxy_headers=proxy_headers,
+        forwarded_allow_ips=forwarded_allow_ips,
+    )
 
 
 @app.command()

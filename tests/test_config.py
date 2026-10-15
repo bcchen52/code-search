@@ -119,3 +119,25 @@ def test_cli_reports_a_bad_config_without_a_traceback(tmp_path):
     result = CliRunner().invoke(app, ["config", str(tmp_path / "missing.yaml")])
     assert result.exit_code == 1
     assert "not found" in result.stderr
+
+
+def test_the_serve_command_passes_proxy_options_to_uvicorn(monkeypatch):
+    pytest.importorskip("uvicorn")
+    runs = []
+    monkeypatch.setattr("uvicorn.run", lambda application, **kwargs: runs.append(kwargs))
+    monkeypatch.setattr("cqa.serve.api.create_app", lambda: "app")
+    result = CliRunner().invoke(
+        app, ["serve", "--port", "9000", "--proxy-headers", "--forwarded-allow-ips", "10.0.0.2"]
+    )
+    assert result.exit_code == 0, result.output
+    assert runs == [
+        {"host": "127.0.0.1", "port": 9000, "proxy_headers": True, "forwarded_allow_ips": "10.0.0.2"}
+    ]
+
+
+def test_the_serve_command_refuses_to_start_without_an_allowlist(monkeypatch):
+    pytest.importorskip("fastapi")
+    for name in ("CQA_REPO_ALLOWLIST", "CQA_ALLOW_ANY_REPO"):
+        monkeypatch.delenv(name, raising=False)
+    result = CliRunner().invoke(app, ["serve"])
+    assert result.exit_code == 1 and "CQA_REPO_ALLOWLIST" in result.stderr

@@ -1,0 +1,15 @@
+# An unanswerable question: the correct answer abstains and says what is
+# missing. It has no gold evidence.
+id: toy-unanswerable-001
+repo: toy
+commit: FIXTURE
+split: dev
+category: unanswerable
+answerable: false
+source: handwritten
+question: Where is OAuth handled?
+gold_answer: >
+  Nowhere: the repository has no OAuth support. Sessions use its own signed
+  JWTs, issued and checked in src/auth/session.py.
+gold_evidence: []
+alt_evidence_sets: []

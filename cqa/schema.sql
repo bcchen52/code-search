@@ -104,7 +104,10 @@ CREATE TABLE IF NOT EXISTS queries (
   tokens_in    INTEGER,
   tokens_out   INTEGER,
   cost_usd     REAL,
-  created_at   TEXT NOT NULL
+  created_at   TEXT NOT NULL,
+  trace        TEXT,             -- JSON Trace: ranked lists, context, answer, everything the inspector shows
+  model        TEXT,             -- the model that answered; differs from the configured one after a fallback
+  stop_reason  TEXT              -- refusal: the answer is empty; max_tokens: it was cut off
 );
 
 -- Evaluation --------------------------------------------------------------
