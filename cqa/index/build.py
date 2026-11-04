@@ -24,10 +24,10 @@ import numpy as np
 from cqa.chunking import enrich
 from cqa.chunking.base import split_lines
 from cqa.chunking.enrich import finalize
-from cqa.config import IndexConfig, canonical_json
+from cqa.config import IndexConfig, StoreParams, canonical_json
 from cqa.embed.base import batched
 from cqa.errors import ConfigError, IndexBuildError, IndexNotReadyError, NotFoundError
-from cqa.index.vector_store import make_store, read_vectors, write_vectors
+from cqa.index.vector_store import open_store, write_vectors
 from cqa.ingest.walker import SkippedFile, read_blobs, resolve_commit, walk
 from cqa.types import Chunk, Chunker, Embedder, SourceFile, VectorStore
 
@@ -162,18 +162,22 @@ def checkout_dir(data_dir: Path, repo_url: str, commit: str) -> Path:
     return data_dir / "repos" / key / commit
 
 
+SEARCH_ONLY = {"store", "store_params"}
+"""Index settings that choose how vectors are searched, not what the index holds."""
+
+
 def index_identity(repo_url: str, commit: str, cfg: IndexConfig, stage_versions: str) -> str:
     """Return the index id: a short SHA-256 over the repository, commit, stage versions, and index config.
 
     ``stage_versions`` joins the version of every stage whose output the index
-    stores. ``cfg.store`` is excluded because every vector store reads the
-    same vectors.
+    stores. ``cfg.store`` and ``cfg.store_params`` are excluded because
+    every vector store reads the same vectors.
     """
     payload = {
         "repo": repo_url,
         "commit": commit,
         "stages": stage_versions,
-        "index": cfg.model_dump(mode="json", exclude={"store"}),
+        "index": cfg.model_dump(mode="json", exclude=SEARCH_ONLY),
     }
     return hashlib.sha256(canonical_json(payload).encode()).hexdigest()[:16]
 
@@ -234,7 +238,7 @@ def build_index(
                 repo_id,
                 commit,
                 versions,
-                canonical_json(cfg.model_dump(mode="json", exclude={"store"})),
+                canonical_json(cfg.model_dump(mode="json", exclude=SEARCH_ONLY)),
                 cfg.embedder,
                 cfg.dims,
                 datetime.now(UTC).isoformat(timespec="seconds"),
@@ -386,8 +390,17 @@ def publish(conn: sqlite3.Connection, index_id: str, n_chunks: int) -> None:
         )
 
 
-def open_index(conn: sqlite3.Connection, index_id: str, data_dir: Path, store_name: str) -> IndexHandle:
+def open_index(
+    conn: sqlite3.Connection,
+    index_id: str,
+    data_dir: Path,
+    store_name: str,
+    store_params: StoreParams | None = None,
+) -> IndexHandle:
     """Open a ready index with the named vector store.
+
+    An approximate store's structure is saved under the index directory on
+    first open and loaded afterwards (see ``open_store``).
 
     Raises:
         IndexNotReadyError: If the index does not exist or is not ready.
@@ -400,8 +413,7 @@ def open_index(conn: sqlite3.Connection, index_id: str, data_dir: Path, store_na
     if row is None or row["status"] != "ready":
         state = "does not exist" if row is None else f"is {row['status']}"
         raise IndexNotReadyError(f"index {index_id} {state}")
-    store = make_store(store_name)
-    store.build(*read_vectors(index_dir(data_dir, index_id), row["dims"]))
+    store = open_store(store_name, store_params, index_dir(data_dir, index_id), row["dims"])
     return IndexHandle(
         index_id=index_id,
         repo_name=row["name"],

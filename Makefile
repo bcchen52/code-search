@@ -1,7 +1,7 @@
 .PHONY: install lint format typecheck test check
 
 install:
-	pip install -e ".[dev,serve]"
+	pip install -e ".[dev,serve,hnsw]"
 
 lint:
 	ruff check .

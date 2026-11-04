@@ -20,6 +20,7 @@ index:
   embedder: modernbert-embed-base  # a key of cqa.embed.MODELS
   dims: 768                      # up to the model's native size; smaller truncates
   store: flat                    # flat | hnswlib | cpp; not part of the index identity
+  store_params: {M: 16, ef_construction: 200, ef_search: 64}  # hnswlib and cpp only
 
 retrieve:
   lists: [dense]                 # any of: dense, bm25, symbol; each needs its store

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS index_versions (
   repo_id          INTEGER NOT NULL REFERENCES repos(id),
   commit_sha       TEXT NOT NULL,
   chunker_version  TEXT NOT NULL,      -- versions of every stage whose output the index stores
-  chunker_params   TEXT NOT NULL,      -- JSON: the index config without `store`
+  chunker_params   TEXT NOT NULL,      -- JSON: the index config without `store` and `store_params`
   embedder_id      TEXT NOT NULL,
   dims             INTEGER NOT NULL,
   status           TEXT NOT NULL,      -- building | ready | failed

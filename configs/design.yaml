@@ -17,6 +17,7 @@ index:
   embedder: qwen3-embedding-0.6b
   dims: 1024
   store: flat
+  store_params: {M: 16, ef_construction: 200, ef_search: 64}  # hnswlib and cpp only
 
 retrieve:
   lists: [dense, bm25, symbol]

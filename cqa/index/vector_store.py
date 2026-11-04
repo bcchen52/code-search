@@ -9,14 +9,33 @@ including the native one.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from cqa.config import StoreParams
 from cqa.index.flat import FlatNumpyStore
 from cqa.types import VectorStore
 
 VECTORS_FILE = "vectors.f32"
 IDS_FILE = "chunk_ids.u64"
+ANN_DIR = "ann"
+"""Saved approximate-search structures, one subdirectory per store and parameters."""
+
+
+@runtime_checkable
+class SavedStore(VectorStore, Protocol):
+    """A store whose built structure is worth saving, such as an HNSW graph."""
+
+    @property
+    def cache_name(self) -> str: ...
+
+    @property
+    def count(self) -> int: ...
+
+    def save(self, ann_dir: Path) -> None: ...
+
+    def load(self, ann_dir: Path, dims: int) -> None: ...
 
 
 def write_vectors(index_dir: Path, vectors: np.ndarray, ids: np.ndarray) -> None:
@@ -51,17 +70,54 @@ def read_vectors(index_dir: Path, dims: int) -> tuple[np.ndarray, np.ndarray]:
     return vectors, ids
 
 
-def make_store(name: str) -> VectorStore:
+def make_store(name: str, params: StoreParams | None = None) -> VectorStore:
     """Return an empty store: ``flat``, ``hnswlib``, or ``cpp``.
 
-    Optional backends are imported only when selected.
+    Optional backends are imported only when selected. ``params`` configures
+    approximate stores, with the library defaults when omitted.
 
     Raises:
         ValueError: If the store name is unknown, or the store is not available
-            yet (only ``flat`` is, for now).
+            yet (``cpp``, for now).
     """
     if name == "flat":
         return FlatNumpyStore()
-    if name in ("hnswlib", "cpp"):
+    if name == "hnswlib":
+        from cqa.index.hnswlib_store import HnswlibStore
+
+        if params is None:
+            return HnswlibStore()
+        return HnswlibStore(params.M, params.ef_construction, params.ef_search)
+    if name == "cpp":
         raise ValueError(f"index.store: the {name!r} store is not available yet")
     raise ValueError(f"index.store: unknown store {name!r}")
+
+
+def open_store(name: str, params: StoreParams | None, index_dir: Path, dims: int) -> VectorStore:
+    """Return a store built over an index's vector files.
+
+    A store with a saved structure (``SavedStore``) is loaded from
+    ``<index_dir>/ann/<cache_name>`` when it was saved there before for the
+    same number of vectors; otherwise it is built and saved. The vector files
+    never change for an index id, so a saved structure stays valid, and its
+    directory name holds every parameter that shapes it.
+
+    Example:
+        The first open of an index with ``store: hnswlib`` builds the graph
+        and writes ``ann/hnswlib-M16-efc200/graph.bin``; later opens load it.
+    """
+    store = make_store(name, params)
+    vectors, ids = read_vectors(index_dir, dims)
+    if not isinstance(store, SavedStore):
+        store.build(vectors, ids)
+        return store
+    saved = index_dir / ANN_DIR / store.cache_name
+    try:
+        store.load(saved, dims)
+        if store.count == len(ids):
+            return store
+    except FileNotFoundError:
+        pass
+    store.build(vectors, ids)
+    store.save(saved)
+    return store

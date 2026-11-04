@@ -250,7 +250,7 @@ def build_answerer(
     index_id = build_index(
         url, commit, checkout, cfg.index, conn, data_dir, make_chunker(cfg.index), embedder
     )
-    handle = open_index(conn, index_id, data_dir, cfg.index.store)
+    handle = open_index(conn, index_id, data_dir, cfg.index.store, cfg.index.store_params)
     pipeline = RetrievalPipeline.from_config(cfg, handle, embedder)
     generator = AnthropicGenerator(cfg.generate, handle.repo_name, commit, cache=LlmCache(caches))
     return Answerer(cfg, pipeline, generator, handle.repo_name, commit, config_hash(cfg), prices)

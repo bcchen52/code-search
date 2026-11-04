@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from cqa.errors import ConfigError
 
@@ -27,6 +27,19 @@ class StrictModel(BaseModel):
     """Base for configuration models: unknown keys are rejected and instances are immutable."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class StoreParams(StrictModel):
+    """Parameters of an approximate vector store; the exact flat store ignores them.
+
+    ``M`` and ``ef_construction`` shape the HNSW graph, and ``ef_search`` is
+    how many candidates a search keeps. All three change results, so they are
+    part of the configuration hash, though not of the index identity.
+    """
+
+    M: int = Field(ge=2)
+    ef_construction: int = Field(ge=1)
+    ef_search: int = Field(ge=1)
 
 
 class IndexConfig(StrictModel):
@@ -45,6 +58,7 @@ class IndexConfig(StrictModel):
     embedder: str
     dims: int
     store: Literal["flat", "hnswlib", "cpp"]
+    store_params: StoreParams
 
 
 class FusionConfig(StrictModel):

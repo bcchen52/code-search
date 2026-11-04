@@ -29,6 +29,8 @@ def test_identity_tracks_everything_but_the_store():
     url = "git@example.com:toy.git"
     a = index_identity(url, "abc123", cfg, "fixed-1")
     assert a == index_identity(url, "abc123", base_index_config(store="hnswlib"), "fixed-1")
+    params = cfg.store_params.model_copy(update={"ef_search": 128})
+    assert a == index_identity(url, "abc123", base_index_config(store_params=params), "fixed-1")
     assert a != index_identity(url, "abc124", cfg, "fixed-1")
     assert a != index_identity(url, "abc123", base_index_config(dims=256), "fixed-1")
     assert a != index_identity(url, "abc123", cfg, "fixed-2")
@@ -144,6 +146,18 @@ def test_search_returns_this_indexs_chunk_ids(toyrepo, main_db, tmp_path):
     target = next(c for c in handle.chunks(range(1, 100)).values() if c.path == "src/auth/session.py")
     (best, score), *_ = handle.store.search(embedder.embed([target.embed_text], "query")[0], 3)
     assert best == target.id and score == pytest.approx(1.0)
+
+
+def test_an_index_opens_with_hnswlib_and_saves_its_graph(toyrepo, main_db, tmp_path):
+    pytest.importorskip("hnswlib")
+    embedder = FakeEmbedder()
+    index_id = build_with(toyrepo, main_db, tmp_path, embedder)
+    params = base_index_config().store_params
+    handle = open_index(main_db, index_id, tmp_path, "hnswlib", params)
+    target = next(c for c in handle.chunks(range(1, 100)).values() if c.path == "src/auth/session.py")
+    (best, score), *_ = handle.store.search(embedder.embed([target.embed_text], "query")[0], 3)
+    assert best == target.id and score == pytest.approx(1.0, abs=1e-5)
+    assert (tmp_path / "indexes" / index_id / "ann" / "hnswlib-M16-efc200" / "graph.bin").is_file()
 
 
 def test_file_lines_clips_at_the_end_and_rejects_bad_ranges(toyrepo, main_db, tmp_path):

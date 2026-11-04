@@ -314,7 +314,9 @@ def _answerer_for(state: ServerState, repo_id: int) -> Answerer:
         answerer = state._answerers.get(index_id)
         if answerer is None:
             cfg = state.config()
-            handle = open_index(state.conn, index_id, state.settings.data_dir, cfg.index.store)
+            handle = open_index(
+                state.conn, index_id, state.settings.data_dir, cfg.index.store, cfg.index.store_params
+            )
             key = (cfg.index.embedder, cfg.index.dims)
             if key not in state._embedders:
                 state._embedders[key] = make_embedder(cfg.index, state.caches)
