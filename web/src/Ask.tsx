@@ -5,12 +5,17 @@ import type { Repo } from "./api";
 import type { CitationStatus, DoneEvent, Source } from "./events";
 import { ApiError, askStream } from "./sse";
 
-type Props = { repo: Repo; onOpen: (target: ChipTarget) => void };
+type Props = {
+  repo: Repo;
+  onOpen: (target: ChipTarget) => void;
+  inspectable: boolean; // the server serves stored queries, so the footer links to the inspector
+  onAnswered: () => void;
+};
 
 type Citations = { statuses: CitationStatus[]; uncited: number[]; malformed: string[] };
 
 /** Ask a question, stream the answer, and turn each citation into a chip that opens the cited lines. */
-export function Ask({ repo, onOpen }: Props) {
+export function Ask({ repo, onOpen, inspectable, onAnswered }: Props) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
   const [sources, setSources] = useState<Source[]>([]);
@@ -56,6 +61,7 @@ export function Ask({ repo, onOpen }: Props) {
         } else if (e.type === "done") {
           setDone(e.data);
           if (e.data.stop_reason === "refusal") setAnswer("");
+          onAnswered();
         } else if (e.type === "error") {
           setProblem(`Failed while ${e.data.stage}: ${e.data.message}`);
         }
@@ -156,7 +162,8 @@ export function Ask({ repo, onOpen }: Props) {
       {done && (
         <p className="muted small footer">
           {done.model || "model"} · first token {fmtMs(done.timings_ms.ttft)} · total {fmtMs(done.timings_ms.total)} ·{" "}
-          {done.cached ? "from the cache, $0" : `$${done.cost_usd.toFixed(4)}`} · query #{done.query_id}
+          {done.cached ? "from the cache, $0" : `$${done.cost_usd.toFixed(4)}`} ·{" "}
+          {inspectable ? <a href={`#/q/${done.query_id}`}>inspect query #{done.query_id}</a> : `query #${done.query_id}`}
         </p>
       )}
     </section>

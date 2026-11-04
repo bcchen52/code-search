@@ -85,3 +85,31 @@ button.chip { cursor: pointer; }
 .viewer-code .line::before { content: attr(data-line); display: inline-block; width: 4.5em; padding-right: 1em; text-align: right; color: var(--muted); user-select: none; }
 .viewer-code .line.cited { background: var(--cited); }
 .viewer-code .line.cited, .viewer-code .line.cited span { background-color: var(--cited) !important; }
+a { color: var(--accent); }
+.masthead h1 a { color: inherit; text-decoration: none; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.inspector h3 { font-size: 14px; margin: 16px 0 6px; }
+.inspector h4 { font-size: 13px; margin: 0 0 4px; }
+.inspector .question { font-weight: 600; margin: 0 0 8px; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; overflow-wrap: anywhere; }
+.stages { display: flex; gap: 2px; font-size: 12px; }
+.stage { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 2px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); }
+.stage.generate { background: var(--valid-bg); }
+.lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.list ol, .context, .citations, .recent { margin: 0; padding-left: 0; list-style: none; }
+.list li { display: flex; justify-content: space-between; gap: 6px; padding: 1px 6px; border-left: 3px solid transparent; font-size: 12px; }
+.list .rank { display: inline-block; width: 2.2em; color: var(--muted); }
+.list .score { color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.list .link { font-size: 12px; }
+.list .link:disabled { color: var(--muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.legend .fate { padding: 0 6px; border-left: 3px solid transparent; }
+.fate.cited { border-left-color: var(--valid); background: var(--valid-bg); }
+.fate.context { border-left-color: var(--accent); }
+.fate.over_budget { border-left-color: var(--range); }
+.fate.reranked_out, .fate.cut { opacity: 0.6; }
+.fate.cut { border-left-color: var(--border); }
+.citations li, .context li, .recent li { margin: 2px 0; }
+.raw pre { white-space: pre-wrap; font-size: 12.5px; }

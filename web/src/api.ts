@@ -1,3 +1,4 @@
+import type { RecentQuery, StoredQuery } from "./inspect";
 import { ApiError } from "./sse";
 
 /** A repository as GET /repos lists it. */
@@ -50,4 +51,17 @@ export async function fileLines(repoId: number, path: string, start: number, end
   const response = await fetch(`/repos/${repoId}/file?${query}`);
   if (!response.ok) await json<never>(response);
   return response.text();
+}
+
+/** True for the 404 a server gives when it does not serve stored queries (CQA_EXPOSE_TRACES unset). */
+export function tracesHidden(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404 && e.message.includes("CQA_EXPOSE_TRACES");
+}
+
+export async function getQuery(queryId: number): Promise<StoredQuery> {
+  return json<StoredQuery>(await fetch(`/queries/${queryId}`));
+}
+
+export async function listQueries(repoId: number, limit = 20): Promise<RecentQuery[]> {
+  return json<RecentQuery[]>(await fetch(`/repos/${repoId}/queries?limit=${limit}`));
 }
