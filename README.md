@@ -117,6 +117,12 @@ curl -N -X POST localhost:8000/repos/1/query -H 'content-type: application/json'
      -d '{"question": "Where is the signature compared?"}'                 # a stream of SSE frames
 ```
 
+The browser client is in `web/`: with the API and a worker running, `cd web && npm ci && npm run dev`
+opens it at http://localhost:5173 (see [web/README.md](web/README.md)).
+
+Stored questions and their traces, which the browser's inspector reads, are
+served only with `CQA_EXPOSE_TRACES=1`: set it locally, never on a public server.
+
 Behind a reverse proxy, run `cqa serve --proxy-headers --forwarded-allow-ips <proxy address>`
 so rate limits see each visitor's address rather than the proxy's.
 

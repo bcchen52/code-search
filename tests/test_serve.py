@@ -69,6 +69,7 @@ def clean_environment(monkeypatch):
         "CQA_DAILY_SPEND_CAP_USD",
         "CQA_REPO_ALLOWLIST",
         "CQA_ALLOW_ANY_REPO",
+        "CQA_EXPOSE_TRACES",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -112,6 +113,16 @@ def test_defaults(monkeypatch):
     s = ServerSettings.from_env()
     assert (str(s.data_dir), str(s.config_path)) == ("data", "configs/base.yaml")
     assert (s.rate_limit_per_min, s.daily_spend_cap_usd) == (10, 1.0)
+    assert s.expose_traces is False
+
+
+def test_traces_are_exposed_only_on_explicit_request(monkeypatch):
+    monkeypatch.setenv("CQA_REPO_ALLOWLIST", "https://github.com/acme/toy")
+    monkeypatch.setenv("CQA_EXPOSE_TRACES", "yes")
+    assert ServerSettings.from_env().expose_traces is True
+    monkeypatch.setenv("CQA_EXPOSE_TRACES", "on")
+    with pytest.raises(ConfigError, match="CQA_EXPOSE_TRACES"):
+        ServerSettings.from_env()
 
 
 @pytest.mark.parametrize(

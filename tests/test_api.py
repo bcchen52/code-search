@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from dataclasses import replace
 
 import pytest
 
@@ -53,6 +54,7 @@ def server(toyrepo, tmp_path, monkeypatch):
         rate_limit_per_min=100,
         daily_spend_cap_usd=1.0,
         repo_allowlist=frozenset({URL, OTHER}),
+        expose_traces=True,
     )
     state = api.ServerState(
         settings=settings,
@@ -234,6 +236,48 @@ def test_unknown_jobs_queries_and_eval_runs_are_404_and_runs_start_empty(server)
     assert client.get("/eval/runs/nope").status_code == 404
 
 
+def test_a_stored_query_names_every_chunk_its_trace_mentions(server):
+    client, _, repo_id, _, _, _ = server
+    done = frames(ask(client, repo_id).text)[-1][1]
+    stored = client.get(f"/queries/{done['query_id']}").json()
+    trace = stored["trace"]
+    mentioned = {e["chunk_id"] for e in trace["lists"]["dense"] + trace["reranked"] + trace["context"]}
+    assert len(trace["lists"]["dense"]) > len(trace["context"])  # some candidates were cut
+    assert {int(k) for k in stored["chunks"]} == mentioned and stored["repo_id"] == repo_id
+    first = trace["context"][0]
+    assert stored["chunks"][str(first["chunk_id"])] == {
+        "path": first["path"],
+        "start_line": first["start_line"],
+        "end_line": first["end_line"],
+        "kind": "window",
+        "symbol": None,
+    }
+
+
+def test_recent_queries_are_newest_first_and_per_repository(server):
+    client, state, repo_id, _, _, _ = server
+    first = frames(ask(client, repo_id, "What does the toy repository do?").text)[-1][1]["query_id"]
+    second = frames(ask(client, repo_id).text)[-1][1]["query_id"]
+    recent = client.get(f"/repos/{repo_id}/queries").json()
+    assert [q["query_id"] for q in recent] == [second, first]
+    assert recent[0]["question"] == QUESTION and recent[0]["low_confidence"] is False
+    assert [q["query_id"] for q in client.get(f"/repos/{repo_id}/queries?limit=1").json()] == [second]
+    client.post("/repos", json={"url": OTHER, "commit": "a" * 40})
+    other = state.conn.execute("SELECT id FROM repos WHERE url = ?", (OTHER,)).fetchone()["id"]
+    assert client.get(f"/repos/{other}/queries").json() == []
+    assert client.get("/repos/999/queries").status_code == 404
+    assert client.get(f"/repos/{repo_id}/queries?limit=0").status_code == 400
+
+
+def test_stored_queries_are_not_served_unless_exposed(server):
+    client, state, repo_id, _, _, _ = server
+    query_id = frames(ask(client, repo_id).text)[-1][1]["query_id"]
+    hidden = TestClient(api.create_app(replace(state, settings=replace(state.settings, expose_traces=False))))
+    for path in (f"/queries/{query_id}", f"/repos/{repo_id}/queries"):
+        response = hidden.get(path)
+        assert response.status_code == 404 and "CQA_EXPOSE_TRACES" in response.json()["message"]
+
+
 def test_answerers_and_embedders_are_built_once(server):
     client, state, repo_id, _, _, _ = server
     ask(client, repo_id)
@@ -247,6 +291,7 @@ def test_create_app_reads_the_environment_and_fails_closed(tmp_path, monkeypatch
         "CQA_ALLOW_ANY_REPO",
         "CQA_RATE_LIMIT_PER_MIN",
         "CQA_DAILY_SPEND_CAP_USD",
+        "CQA_EXPOSE_TRACES",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("CQA_DATA_DIR", str(tmp_path / "data"))

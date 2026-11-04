@@ -82,6 +82,10 @@ def build_app(state: api.ServerState) -> FastAPI:
     def file(repo_id: int, path: str, start: int = 1, end: int = 200) -> str:
         return api.file_lines(state, repo_id, path, start, end)
 
+    @app.get("/repos/{repo_id}/queries")
+    def recent_queries(repo_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        return api.list_queries(state, repo_id, limit)
+
     @app.get("/queries/{query_id}")
     def stored_query(query_id: int) -> dict[str, Any]:
         return api.get_query(state, query_id)

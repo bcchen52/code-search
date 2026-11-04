@@ -11,7 +11,11 @@ Routes:
 - ``GET /jobs/{id}``: an index job's state and progress.
 - ``POST /repos/{id}/query``: answer a question as a server-sent event stream.
 - ``GET /repos/{id}/file``: numbered source lines for the citation viewer.
-- ``GET /queries/{id}``: a stored query trace.
+- ``GET /repos/{id}/queries``: the repository's recent stored queries.
+- ``GET /queries/{id}``: a stored query trace, with the chunks it mentions.
+
+The two query routes are served only when ``CQA_EXPOSE_TRACES`` is set, since
+they show every visitor's questions.
 - ``GET /metrics/summary``: latency percentiles and today's cost.
 - ``GET /eval/runs`` and ``GET /eval/runs/{id}``: evaluation results.
 """
@@ -56,6 +60,7 @@ MAX_QUESTION_CHARS = 2000
 MAX_FILE_LINES = 2000
 METRIC_WINDOW = 1000
 """Recent queries the latency percentiles are computed over."""
+MAX_RECENT_QUERIES = 100
 
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 
@@ -346,26 +351,101 @@ def file_lines(state: ServerState, repo_id: int, path: str, start: int, end: int
     )
 
 
-def get_query(state: ServerState, query_id: int) -> dict[str, Any]:
-    """Return a stored query trace.
+def list_queries(state: ServerState, repo_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """Return a repository's most recent stored queries, newest first.
+
+    Queries against every index of the repository are listed, not only the
+    one served now. ``low_confidence`` is the gate's verdict from the trace.
 
     Raises:
-        NotFoundError: If the query does not exist.
+        NotFoundError: If traces are not exposed, or the repository does not exist.
+        InvalidRequestError: If ``limit`` is not between 1 and ``MAX_RECENT_QUERIES``.
     """
+    _require_traces(state)
+    if not 1 <= limit <= MAX_RECENT_QUERIES:
+        raise InvalidRequestError(f"limit must be between 1 and {MAX_RECENT_QUERIES}")
+    if state.conn.execute("SELECT 1 FROM repos WHERE id = ?", (repo_id,)).fetchone() is None:
+        raise NotFoundError(f"no repository {repo_id}")
+    rows = state.conn.execute(
+        "SELECT q.id, q.question, q.created_at, q.cost_usd, q.model, q.stop_reason, "
+        "json_extract(q.trace, '$.low_confidence') AS low_confidence "
+        "FROM queries q JOIN index_versions v ON v.id = q.index_id "
+        "WHERE v.repo_id = ? ORDER BY q.id DESC LIMIT ?",
+        (repo_id, limit),
+    )
+    return [
+        {
+            "query_id": r["id"],
+            "question": r["question"],
+            "created_at": r["created_at"],
+            "cost_usd": r["cost_usd"],
+            "model": r["model"],
+            "stop_reason": r["stop_reason"],
+            "low_confidence": bool(r["low_confidence"]),
+        }
+        for r in rows
+    ]
+
+
+def get_query(state: ServerState, query_id: int) -> dict[str, Any]:
+    """Return a stored query trace, with the chunks it mentions.
+
+    ``chunks`` maps every chunk id in the trace's ranked lists and context
+    (as a string, since JSON keys are strings) to its ``path``, line range,
+    ``kind``, and ``symbol``, looked up in the index the query was answered
+    from. Chunks of an index that no longer exists are left out.
+
+    Raises:
+        NotFoundError: If traces are not exposed, or the query does not exist.
+    """
+    _require_traces(state)
     row = state.conn.execute(
-        "SELECT id, question, created_at, cost_usd, model, stop_reason, trace FROM queries WHERE id = ?",
+        "SELECT q.id, q.question, q.created_at, q.cost_usd, q.model, q.stop_reason, q.trace, q.index_id, "
+        "v.repo_id FROM queries q LEFT JOIN index_versions v ON v.id = q.index_id WHERE q.id = ?",
         (query_id,),
     ).fetchone()
     if row is None:
         raise NotFoundError(f"no query {query_id}")
+    trace = json.loads(row["trace"]) if row["trace"] else None
     return {
         "query_id": row["id"],
+        "repo_id": row["repo_id"],
         "question": row["question"],
         "created_at": row["created_at"],
         "cost_usd": row["cost_usd"],
         "model": row["model"],
         "stop_reason": row["stop_reason"],
-        "trace": json.loads(row["trace"]) if row["trace"] else None,
+        "trace": trace,
+        "chunks": _trace_chunks(state, row["index_id"], trace) if trace else {},
+    }
+
+
+def _require_traces(state: ServerState) -> None:
+    if not state.settings.expose_traces:
+        raise NotFoundError("stored queries are not served here; set CQA_EXPOSE_TRACES=1 to serve them")
+
+
+def _trace_chunks(state: ServerState, index_id: str, trace: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    entries = [e for ranked in trace.get("lists", {}).values() for e in ranked]
+    entries += trace.get("fused", []) + trace.get("reranked", []) + trace.get("context", [])
+    ids = list(dict.fromkeys(int(e["chunk_id"]) for e in entries))
+    if not ids:
+        return {}
+    rows = state.conn.execute(
+        "SELECT c.id, f.path, c.start_line, c.end_line, c.kind, c.qualified_symbol "
+        "FROM chunks c JOIN files f ON f.id = c.file_id "
+        f"WHERE c.index_id = ? AND c.id IN ({','.join('?' * len(ids))})",
+        [index_id, *ids],
+    )
+    return {
+        str(r["id"]): {
+            "path": r["path"],
+            "start_line": r["start_line"],
+            "end_line": r["end_line"],
+            "kind": r["kind"],
+            "symbol": r["qualified_symbol"],
+        }
+        for r in rows
     }
 
 

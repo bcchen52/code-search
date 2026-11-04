@@ -30,6 +30,9 @@ class ServerSettings:
             indexed and served (``CQA_REPO_ALLOWLIST``, comma-separated), or
             None to allow any https repository, which only an explicit
             ``CQA_ALLOW_ANY_REPO=1`` gives. See docs/decisions/D53-allowlist-fails-closed.md.
+        expose_traces: Whether stored queries, with their questions and
+            traces, are served (``CQA_EXPOSE_TRACES``, off by default). See
+            docs/decisions/D55-traces-off-by-default.md.
     """
 
     data_dir: Path
@@ -37,6 +40,7 @@ class ServerSettings:
     rate_limit_per_min: int
     daily_spend_cap_usd: float
     repo_allowlist: frozenset[str] | None
+    expose_traces: bool = False
 
     @classmethod
     def from_env(cls) -> ServerSettings:
@@ -44,13 +48,14 @@ class ServerSettings:
 
         There is no default allowlist: without ``CQA_REPO_ALLOWLIST``, the
         server refuses to start unless ``CQA_ALLOW_ANY_REPO`` is ``1``,
-        ``true``, or ``yes``.
+        ``true``, or ``yes``. Stored traces are served only when
+        ``CQA_EXPOSE_TRACES`` is one of those.
 
         Raises:
             ConfigError: If a numeric variable does not parse or is out of
                 range, an allowlist entry is not an https repository URL, or
                 the allowlist and ``CQA_ALLOW_ANY_REPO`` are both set, or
-                neither is.
+                neither is, or a yes-or-no variable has another value.
         """
         env = os.environ
         rate = _number("CQA_RATE_LIMIT_PER_MIN", "10", int)
@@ -60,17 +65,15 @@ class ServerSettings:
         if not math.isfinite(cap) or cap < 0:
             raise ConfigError(f"CQA_DAILY_SPEND_CAP_USD must be a non-negative amount, got {cap}")
 
-        any_repo = env.get("CQA_ALLOW_ANY_REPO", "").strip().lower()
-        if any_repo not in _TRUE + _FALSE:
-            raise ConfigError(f"CQA_ALLOW_ANY_REPO must be 1, true, yes, 0, false, or no, got {any_repo!r}")
+        any_repo = _flag("CQA_ALLOW_ANY_REPO")
         entries = [e.strip() for e in env.get("CQA_REPO_ALLOWLIST", "").split(",") if e.strip()]
         try:
             allowlist = frozenset(normalize_repo_url(e) for e in entries)
         except RepoNotAllowedError as e:
             raise ConfigError(f"CQA_REPO_ALLOWLIST: {e}") from e
-        if allowlist and any_repo in _TRUE:
+        if allowlist and any_repo:
             raise ConfigError("set CQA_REPO_ALLOWLIST or CQA_ALLOW_ANY_REPO, not both")
-        if not allowlist and any_repo not in _TRUE:
+        if not allowlist and not any_repo:
             raise ConfigError(
                 "CQA_REPO_ALLOWLIST is empty: list the https repositories to serve, "
                 "or set CQA_ALLOW_ANY_REPO=1 to serve any https repository"
@@ -81,7 +84,15 @@ class ServerSettings:
             rate_limit_per_min=rate,
             daily_spend_cap_usd=cap,
             repo_allowlist=allowlist or None,
+            expose_traces=_flag("CQA_EXPOSE_TRACES"),
         )
+
+
+def _flag(name: str) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if raw not in _TRUE + _FALSE:
+        raise ConfigError(f"{name} must be 1, true, yes, 0, false, or no, got {raw!r}")
+    return raw in _TRUE
 
 
 def _number(name: str, default: str, kind: type[_N]) -> _N:
