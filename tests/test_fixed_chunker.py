@@ -6,6 +6,7 @@ from cqa.chunking import make_chunker
 from cqa.chunking.base import line_text, make_chunk, split_lines
 from cqa.chunking.enrich import finalize
 from cqa.chunking.fixed import FixedWindowChunker
+from cqa.chunking.subtokenize import lexical_text
 from cqa.config import IndexConfig, load_config
 from cqa.errors import ConfigError
 from cqa.tokens import count_tokens
@@ -111,11 +112,12 @@ def test_finalize_leaves_a_baseline_chunk_unchanged():
     assert finalize(c, f, index_cfg()) == c
 
 
-def test_finalize_refuses_the_lexical_store_until_it_exists():
+def test_finalize_fills_lexical_text_only_for_the_lexical_store():
     f = numbered(5)
     c = FixedWindowChunker(40, 10).chunk(f)[0]
-    with pytest.raises(ConfigError, match="lexical"):
-        finalize(c, f, index_cfg(stores=["vectors", "lexical"]))
+    assert finalize(c, f, index_cfg()).lexical_text == ""
+    lexical = finalize(c, f, index_cfg(stores=["vectors", "lexical"])).lexical_text
+    assert lexical == lexical_text(c.raw_text) and lexical
 
 
 def test_make_chunker_uses_the_configured_windows():

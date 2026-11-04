@@ -11,6 +11,7 @@ from cqa.generate.context import assemble
 from cqa.index.build import build_index, open_index
 from cqa.index.flat import FlatNumpyStore
 from cqa.retrieve.dense import DenseRetriever
+from cqa.retrieve.fusion import rrf
 from cqa.retrieve.gate import is_low_confidence, tune_tau
 from cqa.retrieve.pipeline import RetrievalPipeline
 from cqa.retrieve.query import extract_identifiers
@@ -101,6 +102,39 @@ def toy_index(toyrepo, main_db, caches_db, tmp_path):
     return cfg, open_index(main_db, index_id, tmp_path, "flat"), embedder
 
 
+@pytest.fixture
+def hybrid_index(toyrepo, main_db, caches_db, tmp_path):
+    repo, sha = toyrepo
+    embedder = CachedEmbedder(FakeEmbedder(), caches_db)
+    base = load_config(ROOT / "configs/exp/bm25.yaml")
+    index = base.index.model_copy(update={"embedder": "fake", "dims": 16})
+    cfg = base.model_copy(update={"index": index})
+    index_id = build_index(
+        str(repo), sha, repo, cfg.index, main_db, tmp_path, FixedWindowChunker(40, 10), embedder
+    )
+    return cfg, open_index(main_db, index_id, tmp_path, "flat"), embedder
+
+
+def test_dense_and_bm25_lists_are_fused(hybrid_index):
+    cfg, handle, embedder = hybrid_index
+    result = RetrievalPipeline.from_config(cfg, handle, embedder).run("where is validate_token defined?")
+    assert set(result.lists) == {"dense", "bm25"} and {"dense", "bm25", "load", "total"} <= set(
+        result.timings_ms
+    )
+    assert {s.source for s in result.fused} == {"fused"} and len(result.fused) <= cfg.retrieve.candidates
+    top_bm25 = result.lists["bm25"][0].chunk_id
+    assert result.chunks[top_bm25].path == "src/auth/session.py"
+    f = cfg.retrieve.fusion
+    assert result.fused == rrf(result.lists, f.k, f.weights, limit=cfg.retrieve.candidates)
+
+
+def test_bm25_weights_come_from_the_configuration(hybrid_index):
+    cfg, handle, embedder = hybrid_index
+    weighted = with_changes(cfg, retrieve={"bm25_weights": (0.0, 9.0, 1.0)})
+    pipeline = RetrievalPipeline.from_config(weighted, handle, embedder)
+    assert pipeline.retrievers["bm25"].lexical.weights == (0.0, 9.0, 1.0)
+
+
 def with_changes(cfg, **sections):
     return cfg.model_copy(
         update={name: getattr(cfg, name).model_copy(update=v) for name, v in sections.items()}
@@ -146,7 +180,7 @@ def test_the_pipeline_feeds_context_assembly(toy_index):
 @pytest.mark.parametrize(
     "sections, message",
     [
-        ({"retrieve": {"lists": ["dense", "bm25"]}}, "bm25 not available yet"),
+        ({"retrieve": {"lists": ["dense", "bm25"]}}, "bm25 needs index .* lexical store"),
         ({"retrieve": {"lists": ["symbol"]}}, "symbol not available yet"),
         ({"rerank": {"model": "llm", "model_id": "some-model"}}, "not available yet"),
     ],

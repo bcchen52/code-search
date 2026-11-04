@@ -1,0 +1,7 @@
+# Hypothesis: BM25 over code subtokens recovers questions that name exact identifiers.
+# Primary metric: hit at 8 on locate and enumerate questions.
+extends: ../base.yaml
+index:
+  stores: [vectors, lexical]
+retrieve:
+  lists: [dense, bm25]

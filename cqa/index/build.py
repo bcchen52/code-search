@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import json
 import shutil
 import sqlite3
 from collections.abc import Callable, Sequence
@@ -21,12 +22,14 @@ from pathlib import Path
 
 import numpy as np
 
-from cqa.chunking import enrich
+from cqa.chunking import enrich, subtokenize
 from cqa.chunking.base import split_lines
 from cqa.chunking.enrich import finalize
 from cqa.config import IndexConfig, StoreParams, canonical_json
 from cqa.embed.base import batched
 from cqa.errors import ConfigError, IndexBuildError, IndexNotReadyError, NotFoundError
+from cqa.index import lexical
+from cqa.index.lexical import LexicalIndex
 from cqa.index.vector_store import open_store, write_vectors
 from cqa.ingest.walker import SkippedFile, read_blobs, resolve_commit, walk
 from cqa.types import Chunk, Chunker, Embedder, SourceFile, VectorStore
@@ -37,7 +40,7 @@ OnStage = Callable[[str, float], None]
 EMBED_BATCH = 512
 """Chunks embedded per call while building, so memory stays flat on large repositories."""
 
-AVAILABLE_STORES = frozenset({"vectors"})
+AVAILABLE_STORES = frozenset({"vectors", "lexical"})
 """Stores this version can build; the others raise ``ConfigError``."""
 
 _QUERY_BATCH = 500
@@ -53,6 +56,7 @@ class IndexHandle:
     checkout: Path
     conn: sqlite3.Connection
     store: VectorStore | None
+    lexical: LexicalIndex | None = None
 
     def chunks(self, ids: Sequence[int]) -> dict[int, Chunk]:
         """Load chunks by id in one query per batch of ids.
@@ -126,7 +130,10 @@ def stage_versions(chunker: Chunker, cfg: IndexConfig) -> str:
     unavailable = sorted(set(cfg.stores) - AVAILABLE_STORES)
     if unavailable:
         raise ConfigError(f"index.stores: {', '.join(unavailable)} not available yet")
-    return f"{chunker.version}+enrich-{enrich.VERSION}"
+    versions = f"{chunker.version}+enrich-{enrich.VERSION}"
+    if "lexical" in cfg.stores:
+        versions += f"+subtokenize-{subtokenize.VERSION}+lexical-{lexical.VERSION}"
+    return versions
 
 
 def resolve_repo(repo: str, commit: str | None) -> tuple[str, str]:
@@ -284,6 +291,7 @@ def _discard(conn: sqlite3.Connection, index_id: str, data_dir: Path) -> None:
         for table in ("refs", "symbols", "chunks", "files", "index_versions"):
             column = "id" if table == "index_versions" else "index_id"
             conn.execute(f"DELETE FROM {table} WHERE {column} = ?", (index_id,))
+    LexicalIndex(conn, index_id).drop()
     shutil.rmtree(index_dir(data_dir, index_id), ignore_errors=True)
 
 
@@ -358,7 +366,7 @@ def build_stores(
     """Build each store listed in ``cfg.stores`` from the written chunks.
 
     ``vectors`` embeds ``embed_text`` in document mode and writes the vector
-    files.
+    files; ``lexical`` creates and fills the index's FTS5 table.
 
     Chunks are embedded ``EMBED_BATCH`` at a time.
 
@@ -380,6 +388,10 @@ def build_stores(
         target = index_dir(data_dir, index_id)
         target.mkdir(parents=True, exist_ok=True)
         write_vectors(target, np.concatenate(parts), np.array([c.id for c in chunks], dtype=np.uint64))
+    if "lexical" in cfg.stores:
+        table = LexicalIndex(conn, index_id)
+        table.create()
+        table.add(chunks)
 
 
 def publish(conn: sqlite3.Connection, index_id: str, n_chunks: int) -> None:
@@ -397,16 +409,17 @@ def open_index(
     store_name: str,
     store_params: StoreParams | None = None,
 ) -> IndexHandle:
-    """Open a ready index with the named vector store.
+    """Open a ready index with the named vector store and its lexical store, if it was built with one.
 
-    An approximate store's structure is saved under the index directory on
+    The lexical store opens with the default column weights; retrieval
+    applies its configured ones. An approximate store's structure is saved under the index directory on
     first open and loaded afterwards (see ``open_store``).
 
     Raises:
         IndexNotReadyError: If the index does not exist or is not ready.
     """
     row = conn.execute(
-        "SELECT v.status, v.commit_sha, v.dims, r.url, r.name FROM index_versions v "
+        "SELECT v.status, v.commit_sha, v.dims, v.chunker_params, r.url, r.name FROM index_versions v "
         "JOIN repos r ON r.id = v.repo_id WHERE v.id = ?",
         (index_id,),
     ).fetchone()
@@ -414,6 +427,7 @@ def open_index(
         state = "does not exist" if row is None else f"is {row['status']}"
         raise IndexNotReadyError(f"index {index_id} {state}")
     store = open_store(store_name, store_params, index_dir(data_dir, index_id), row["dims"])
+    built = json.loads(row["chunker_params"])["stores"]
     return IndexHandle(
         index_id=index_id,
         repo_name=row["name"],
@@ -421,6 +435,7 @@ def open_index(
         checkout=checkout_dir(data_dir, row["url"], row["commit_sha"]),
         conn=conn,
         store=store,
+        lexical=LexicalIndex(conn, index_id) if "lexical" in built else None,
     )
 
 

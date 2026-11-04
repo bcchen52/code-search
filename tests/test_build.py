@@ -170,8 +170,8 @@ def test_file_lines_clips_at_the_end_and_rejects_bad_ranges(toyrepo, main_db, tm
 
 
 def test_unavailable_stores_and_a_mismatched_embedder_write_nothing(toyrepo, main_db, tmp_path):
-    with pytest.raises(ConfigError, match="lexical"):
-        build_with(toyrepo, main_db, tmp_path, FakeEmbedder(), stores=["vectors", "lexical"])
+    with pytest.raises(ConfigError, match="symbols"):
+        build_with(toyrepo, main_db, tmp_path, FakeEmbedder(), stores=["vectors", "symbols"])
     repo, sha = toyrepo
     with pytest.raises(ConfigError, match="does not match"):
         build_index(
@@ -182,6 +182,29 @@ def test_unavailable_stores_and_a_mismatched_embedder_write_nothing(toyrepo, mai
 
 def test_stage_versions_count_only_built_stores():
     assert stage_versions(FixedWindowChunker(), base_index_config()) == "fixed-1+enrich-1"
+    hybrid = base_index_config(stores=["vectors", "lexical"])
+    assert stage_versions(FixedWindowChunker(), hybrid) == "fixed-1+enrich-1+subtokenize-1+lexical-1"
+
+
+def test_a_lexical_index_is_built_opened_and_discarded(toyrepo, main_db, tmp_path):
+    index_id = build_with(toyrepo, main_db, tmp_path, FakeEmbedder(), stores=["vectors", "lexical"])
+    handle = open_index(main_db, index_id, tmp_path, "flat")
+    assert handle.lexical is not None
+    (best, _), *_ = handle.lexical.search('"validate_token"', 5)
+    assert handle.chunks([best])[best].path == "src/auth/session.py"
+    assert (
+        open_index(main_db, build_with(toyrepo, main_db, tmp_path, FakeEmbedder()), tmp_path, "flat").lexical
+        is None
+    )
+
+    main_db.execute("UPDATE index_versions SET status = 'building' WHERE id = ?", (index_id,))
+    main_db.commit()
+    assert build_with(toyrepo, main_db, tmp_path, FakeEmbedder(), stores=["vectors", "lexical"]) == index_id
+    tables = main_db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name = ?", (f"fts_{index_id}",))
+    assert tables.fetchone()[0] == 1  # the abandoned table was dropped and built again, not duplicated
+    assert len(handle.lexical.search('"validate_token"', 50)) == len(
+        open_index(main_db, index_id, tmp_path, "flat").lexical.search('"validate_token"', 50)
+    )
 
 
 def test_an_index_with_no_chunks_opens_and_searches(tmp_path, main_db):

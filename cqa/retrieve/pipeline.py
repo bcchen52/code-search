@@ -9,12 +9,15 @@ from dataclasses import dataclass, field
 from cqa.config import Config
 from cqa.errors import ConfigError
 from cqa.index.build import IndexHandle
+from cqa.index.lexical import LexicalIndex
+from cqa.retrieve.bm25 import Bm25Retriever
 from cqa.retrieve.dense import DenseRetriever
+from cqa.retrieve.fusion import rrf
 from cqa.retrieve.gate import is_low_confidence
 from cqa.retrieve.rerank import make_reranker
 from cqa.types import Chunk, Embedder, Reranker, Retriever, Scored
 
-AVAILABLE_LISTS = frozenset({"dense"})
+AVAILABLE_LISTS = frozenset({"dense", "bm25"})
 """Retrievers this version can build; the others raise ``ConfigError``."""
 
 
@@ -60,17 +63,28 @@ class RetrievalPipeline:
     def from_config(cls, cfg: Config, index: IndexHandle, embedder: Embedder) -> RetrievalPipeline:
         """Build the retrievers in ``cfg.retrieve.lists`` and the reranker in ``cfg.rerank``.
 
+        BM25 reads the index's lexical store with ``cfg.retrieve.bm25_weights``
+        for the symbol, path, and body columns.
+
         Raises:
             ConfigError: If a configured retriever or reranker is not available
-                yet (only ``dense`` and ``none`` are, for now), or the index has
-                no vector store.
+                yet, or the index lacks the store a configured retriever reads.
         """
         unavailable = sorted(set(cfg.retrieve.lists) - AVAILABLE_LISTS)
         if unavailable:
             raise ConfigError(f"retrieve.lists: {', '.join(unavailable)} not available yet")
-        if index.store is None:
-            raise ConfigError("retrieve.lists: dense retrieval needs an index opened with a vector store")
-        retrievers: dict[str, Retriever] = {"dense": DenseRetriever(embedder, index.store)}
+        retrievers: dict[str, Retriever] = {}
+        if "dense" in cfg.retrieve.lists:
+            if index.store is None:
+                raise ConfigError("retrieve.lists: dense retrieval needs an index opened with a vector store")
+            retrievers["dense"] = DenseRetriever(embedder, index.store)
+        if "bm25" in cfg.retrieve.lists:
+            if index.lexical is None:
+                raise ConfigError(
+                    f"retrieve.lists: bm25 needs index {index.index_id} built with the lexical store"
+                )
+            weighted = LexicalIndex(index.conn, index.index_id, cfg.retrieve.bm25_weights)
+            retrievers["bm25"] = Bm25Retriever(weighted)
         return cls(cfg, retrievers, make_reranker(cfg.rerank), index)
 
     def run(self, question: str) -> Retrieval:
@@ -99,9 +113,10 @@ class RetrievalPipeline:
         with ThreadPoolExecutor(max_workers=len(self.retrievers)) as pool:
             for name, ranked, ms in pool.map(lambda item: timed(*item), self.retrievers.items()):
                 lists[name], timings[name] = ranked, ms
-        if len(lists) != 1:
-            raise ConfigError("retrieve.lists: fusing several lists is not available yet")
-        fused = next(iter(lists.values()))[: r.candidates]
+        if len(lists) > 1:
+            fused = rrf(lists, r.fusion.k, r.fusion.weights, limit=r.candidates)
+        else:
+            fused = next(iter(lists.values()))[: r.candidates]
 
         t = time.perf_counter()
         chunks = self.index.chunks([s.chunk_id for ranked in lists.values() for s in ranked])
